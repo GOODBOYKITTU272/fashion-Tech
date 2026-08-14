@@ -1,5 +1,5 @@
 # Implementation Plan
-**Version:** 2.2 (Autonomous LinkedIn Official API Architecture — Two-Table Token Security)
+**Version:** 2.3 (Autonomous LinkedIn Official API Architecture — Hardened Audit Log & AES-GCM Auth Tag)
 
 ---
 
@@ -9,7 +9,8 @@
 - Corrected carousel terminology to **LinkedIn Document/PDF Carousel Posts**.
 - Documented token lifecycle and generic `reauthorization_required` handling.
 - Specified **Two-Table Token Isolation**: split safe connection metadata (`linkedin_connections`) from encrypted secret credentials (`linkedin_credentials`).
-- Specified AES-256-GCM server-side encryption (`LINKEDIN_TOKEN_ENCRYPTION_KEY` + `encryption_iv`) with RLS browser denial.
+- Specified AES-256-GCM server-side encryption (`LINKEDIN_TOKEN_ENCRYPTION_KEY` + `encryption_iv` + `encryption_auth_tag`) with RLS browser denial.
+- Hardened audit logs (`publishing_attempts`, `automation_events`) with `user_id REFERENCES auth.users(id)` and owner-restricted RLS policies.
 - Defined explicit 8-state integration state machine (`NOT_CONFIGURED`, `WAITING_FOR_API_ACCESS`, `CONNECTED`, etc.).
 - Hardened database definitions with `NOT NULL` constraints, foreign keys to `auth.users(id)`, and uniqueness rules (`uq_linkedin_connections_user`, `uq_linkedin_credentials_conn`, `uq_automation_settings_user`).
 - Documented Community Management API Development vs Standard Tier policy.
@@ -20,10 +21,10 @@
 ### Phase 2: Database Migration 002 (Awaiting Approval)
 - Create `supabase/migrations/002_linkedin_official_api.sql` containing:
   - `linkedin_connections` (browser-safe metadata, RLS enabled for user read)
-  - `linkedin_credentials` (AES-256-GCM encrypted secrets, 100% RLS browser denial)
+  - `linkedin_credentials` (AES-256-GCM encrypted secrets + IV + Auth Tag, 100% RLS browser denial)
   - `automation_settings` (user-tied settings, RLS enabled)
-  - `publishing_attempts` (audit log, NOT NULL hardened)
-  - `automation_events` (failsafe audit, NOT NULL hardened)
+  - `publishing_attempts` (audit log, user_id owned, NOT NULL hardened)
+  - `automation_events` (failsafe audit, user_id owned, NOT NULL hardened)
 - Run `npx supabase db push`.
 
 ---

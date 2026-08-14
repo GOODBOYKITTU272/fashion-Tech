@@ -1,5 +1,5 @@
 # TRD — Technical Requirements Document
-**Version:** 2.2 (Autonomous LinkedIn Official API Architecture — Two-Table Token Security)
+**Version:** 2.3 (Autonomous LinkedIn Official API Architecture — Hardened Audit Log & AES-GCM Auth Tag)
 
 ---
 
@@ -14,7 +14,7 @@ AI Provider Abstraction (OpenAI / Gemini / Ollama)
         ↓
 Supabase PostgreSQL (state management, RLS, audit logs)
         ├── linkedin_connections (browser-safe metadata)
-        └── linkedin_credentials (server-only AES-256-GCM encrypted tokens)
+        └── linkedin_credentials (server-only AES-256-GCM encrypted tokens + IV + Auth Tag)
         ↓
 PDF Document Generator (for 6–8 slide document/PDF carousel posts)
         ↓
@@ -32,7 +32,7 @@ LinkedIn's 3-legged OAuth 2.0 flow issues access tokens that expire after a set 
 
 Token Lifecycle fields:
 - `linkedin_connections`: `expires_at`, `granted_scopes`, `last_verified_at`, `auth_status` (`valid` | `expiring_soon` | `expired` | `revoked`), `reauthorization_required` (boolean).
-- `linkedin_credentials`: `access_token_ciphertext` (AES-256-GCM encrypted token string), `encryption_iv` (AES-256-GCM initialization vector).
+- `linkedin_credentials`: `access_token_ciphertext` (AES-256-GCM encrypted token string), `encryption_iv` (AES-256-GCM initialization vector), `encryption_auth_tag` (AES-256-GCM authentication tag).
 
 When `expires_at` is < 7 days away or an API call returns 401 Unauthorized:
 - `auth_status` is updated to `expiring_soon` or `expired`.
@@ -41,12 +41,16 @@ When `expires_at` is < 7 days away or an API call returns 401 Unauthorized:
 - Automated publishing (W6) pauses safely.
 - Settings UI displays a prominent **"LinkedIn Reauthorization Required"** button.
 
-### Two-Table Token Isolation & Server-Side Security
+### Two-Table Token Isolation & Server-Side AES-256-GCM Security
 1. **Physical Table Isolation**: Safe connection metadata (`linkedin_connections`) is split from encrypted secret credentials (`linkedin_credentials`).
-2. **Server-Side AES-256-GCM Encryption**: Encryption and decryption occur strictly server-side using AES-256-GCM with an initialization vector (`encryption_iv`) and a 32-byte symmetric key (`LINKEDIN_TOKEN_ENCRYPTION_KEY`) stored ONLY in server environment variables.
+2. **Server-Side AES-256-GCM Encryption**: Encryption and decryption occur strictly server-side using AES-256-GCM with:
+   - `access_token_ciphertext` (TEXT)
+   - `encryption_iv` (TEXT)
+   - `encryption_auth_tag` (TEXT)
+   - Symmetric key (`LINKEDIN_TOKEN_ENCRYPTION_KEY`) stored ONLY in server environment variables.
 3. **RLS & Browser Denial**: Supabase RLS enables NO SELECT/INSERT/UPDATE/DELETE policies on `linkedin_credentials` for `anon` or `authenticated` browser roles. The browser cannot read or query secrets.
-4. **Service-Role Execution**: Decryption occurs only in trusted server-side API routes or n8n nodes executing with the Supabase `service_role` key.
-5. **No Secret Logging**: Plaintext tokens, ciphertext, encryption keys, Authorization headers, OAuth authorization codes, and client secrets MUST NEVER be logged to application logs or database audit tables.
+4. **Audit Log Ownership**: `publishing_attempts` and `automation_events` tables are tied directly to `user_id REFERENCES auth.users(id)` and protected by `auth.uid() = user_id` RLS policies.
+5. **No Secret Logging**: Plaintext tokens, ciphertext, IVs, auth tags, encryption keys, Authorization headers, OAuth authorization codes, and client secrets MUST NEVER be logged to application logs or database audit tables.
 
 ---
 

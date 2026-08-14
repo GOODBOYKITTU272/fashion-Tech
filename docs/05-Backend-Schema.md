@@ -1,5 +1,5 @@
 # Backend Database Schema
-**Version:** 2.2 (Autonomous LinkedIn Official API Architecture — Two-Table Token Security)
+**Version:** 2.3 (Autonomous LinkedIn Official API Architecture — Hardened Audit Log & AES-GCM Auth Tag)
 
 ---
 
@@ -68,6 +68,7 @@ CREATE TABLE public.linkedin_credentials (
     connection_id UUID NOT NULL REFERENCES public.linkedin_connections(id) ON DELETE CASCADE,
     access_token_ciphertext TEXT NOT NULL, -- AES-256-GCM encrypted token string
     encryption_iv TEXT NOT NULL,           -- Initialization Vector / Nonce for AES-256-GCM
+    encryption_auth_tag TEXT NOT NULL,     -- Authentication Tag for AES-256-GCM integrity
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_linkedin_credentials_conn UNIQUE (connection_id)
@@ -94,6 +95,7 @@ Audit log of official LinkedIn Posts API requests. Secrets, OAuth codes, and Aut
 ```sql
 CREATE TABLE public.publishing_attempts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     published_post_id UUID REFERENCES public.published_posts(id) ON DELETE SET NULL,
     calendar_id UUID REFERENCES public.content_calendar(id) ON DELETE SET NULL,
     attempt_number INT NOT NULL DEFAULT 1,
@@ -113,6 +115,7 @@ Audit log of system failsafes, alerts, and state transitions.
 ```sql
 CREATE TABLE public.automation_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     event_type TEXT NOT NULL CHECK (
         event_type IN (
             'FAILSAFE_TRIGGERED', 'TOKEN_EXPIRED', 'NEEDS_INPUT',
@@ -151,10 +154,11 @@ CREATE POLICY "user_read_own_connection" ON public.linkedin_connections
 CREATE POLICY "user_manage_own_settings" ON public.automation_settings
     FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
--- 4. publishing_attempts & automation_events: Read-only for authenticated user
-CREATE POLICY "user_read_attempts" ON public.publishing_attempts
-    FOR SELECT TO authenticated USING (true);
+-- 4. publishing_attempts: Read-only for authenticated owner
+CREATE POLICY "user_read_own_attempts" ON public.publishing_attempts
+    FOR SELECT TO authenticated USING (auth.uid() = user_id);
 
-CREATE POLICY "user_read_events" ON public.automation_events
-    FOR SELECT TO authenticated USING (true);
+-- 5. automation_events: Read-only for authenticated owner
+CREATE POLICY "user_read_own_events" ON public.automation_events
+    FOR SELECT TO authenticated USING (auth.uid() = user_id);
 ```
