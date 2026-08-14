@@ -1,7 +1,6 @@
 export const dynamic = 'force-dynamic'
 import { getTopOpportunities } from '@/lib/data'
 
-
 function ScoreRing({ score }: { score: number }) {
   const cls = score >= 75 ? 'score-high' : score >= 50 ? 'score-mid' : 'score-low'
   return <div className={`score-ring ${cls}`}>{score}</div>
@@ -45,6 +44,19 @@ export default async function InboxPage() {
 
   return (
     <div className="page">
+      {/* State Machine Status Header */}
+      <div className="card card-pad-sm" style={{ background: 'var(--accent-dim)', borderColor: 'rgba(244,162,97,0.3)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span className="badge badge-green">AUTO MODE: ON</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: 600 }}>
+            🛡️ LINKEDIN AUTOMATION — WAITING FOR API ACCESS
+          </span>
+        </div>
+        <a href="/settings" className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}>
+          ⚙️ Manage OAuth
+        </a>
+      </div>
+
       <div className="page-header">
         <div>
           <h1 className="page-title">Today&apos;s Inbox</h1>
@@ -60,7 +72,7 @@ export default async function InboxPage() {
           <div className="empty-icon">📭</div>
           <p className="empty-title">No opportunities yet today</p>
           <p className="text-muted" style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
-            The daily research workflow runs at 2 AM. You can trigger a manual sync above.
+            The daily research workflow (W1/W2) runs automatically at 2:00 AM.
           </p>
         </div>
       ) : (
@@ -70,7 +82,6 @@ export default async function InboxPage() {
               <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'flex-start' }}>
                 <ScoreRing score={topic.total_opportunity_score} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  {/* Header row */}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
                     <span className="badge badge-primary">#{i + 1}</span>
                     {topic.category && <span className="badge badge-gray">{topic.category}</span>}
@@ -86,44 +97,28 @@ export default async function InboxPage() {
                     </span>
                   </div>
 
-                  {/* Title */}
                   <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.5rem', lineHeight: 1.4 }}>
                     {topic.cluster_title}
                   </h2>
 
-                  {/* Summary */}
                   {topic.summary && (
                     <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', lineHeight: 1.6, marginBottom: '1rem' }}>
                       {topic.summary}
                     </p>
                   )}
 
-                  {/* Score bars */}
                   <ScoreBars topic={topic} />
 
-                  {/* Actions */}
                   <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem', flexWrap: 'wrap' }}>
                     <a href={`/editor?cluster=${topic.cluster_id}`} className="btn btn-primary btn-sm">
-                      ✏️ Create Draft
+                      ✏️ View Auto Draft
                     </a>
-                    <button className="btn btn-ghost btn-sm">👁 View Sources</button>
-                    <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto', color: 'var(--text-3)' }}>
-                      Skip
-                    </button>
+                    <button className="btn btn-ghost btn-sm">👁 View Signals</button>
                   </div>
                 </div>
               </div>
             </article>
           ))}
-        </div>
-      )}
-
-      {/* Seed notice */}
-      {topics.length === 0 && (
-        <div className="card card-pad-sm" style={{ marginTop: '1.5rem', background: 'var(--yellow-dim)', borderColor: 'rgba(251,191,36,0.3)' }}>
-          <p style={{ fontSize: '0.8rem', color: 'var(--yellow)' }}>
-            <strong>Setup tip:</strong> Once n8n W1 and W2 workflows are running, research signals will appear here automatically each morning.
-          </p>
         </div>
       )}
     </div>

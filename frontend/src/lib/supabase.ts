@@ -177,6 +177,70 @@ export type Database = {
           created_at: string
         }
       }
+      linkedin_connections: {
+        Row: {
+          id: string
+          user_id: string
+          linkedin_member_urn: string | null
+          granted_scopes: string[] | null
+          integration_status: 'NOT_CONFIGURED' | 'WAITING_FOR_API_ACCESS' | 'READY_FOR_OAUTH' | 'CONNECTED' | 'REAUTH_REQUIRED' | 'PERMISSION_MISSING' | 'PAUSED' | 'ERROR'
+          auth_status: 'valid' | 'expiring_soon' | 'expired' | 'revoked'
+          expires_at: string | null
+          last_verified_at: string | null
+          reauthorization_required: boolean
+          created_at: string
+          updated_at: string
+        }
+      }
+      linkedin_credentials: {
+        Row: {
+          id: string
+          connection_id: string
+          access_token_ciphertext: string
+          encryption_iv: string
+          encryption_auth_tag: string
+          created_at: string
+          updated_at: string
+        }
+      }
+      automation_settings: {
+        Row: {
+          id: string
+          user_id: string
+          auto_mode_enabled: boolean
+          pause_all_publishing: boolean
+          min_confidence_score: number
+          created_at: string
+          updated_at: string
+        }
+      }
+      publishing_attempts: {
+        Row: {
+          id: string
+          user_id: string
+          published_post_id: string | null
+          calendar_id: string | null
+          attempt_number: number
+          request_type: 'text' | 'image' | 'multi_image' | 'video' | 'document_pdf'
+          http_status: number | null
+          linkedin_request_id: string | null
+          error_code: string | null
+          failure_reason: string | null
+          created_at: string
+        }
+      }
+      automation_events: {
+        Row: {
+          id: string
+          user_id: string
+          event_type: 'FAILSAFE_TRIGGERED' | 'TOKEN_EXPIRED' | 'NEEDS_INPUT' | 'REAUTH_REQUIRED' | 'PERMISSION_MISSING' | 'QUALITY_GATE_FAILED'
+          severity: 'info' | 'warning' | 'critical'
+          message: string
+          metadata: Record<string, unknown> | null
+          created_at: string
+          resolved_at: string | null
+        }
+      }
     }
   }
 }
