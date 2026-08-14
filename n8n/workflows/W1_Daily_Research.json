@@ -1,0 +1,71 @@
+{
+  "name": "W1: Daily Research",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM public.sources WHERE is_active = true;"
+      },
+      "name": "Fetch Sources",
+      "type": "n8n-nodes-base.supabase",
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.url}}",
+        "responseFormat": "json"
+      },
+      "name": "HTTP Request (Agent Reach Scraper)",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "research_signals",
+        "dataMode": "define",
+        "values": {
+          "source_id": "={{$json.source_id}}",
+          "url": "={{$json.article_url}}",
+          "title": "={{$json.title}}",
+          "summary": "={{$json.summary}}"
+        }
+      },
+      "name": "Save to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [{"node": "Fetch Sources", "type": "main", "index": 0}]
+      ]
+    },
+    "Fetch Sources": {
+      "main": [
+        [{"node": "HTTP Request (Agent Reach Scraper)", "type": "main", "index": 0}]
+      ]
+    },
+    "HTTP Request (Agent Reach Scraper)": {
+      "main": [
+        [{"node": "Save to Supabase", "type": "main", "index": 0}]
+      ]
+    }
+  }
+}

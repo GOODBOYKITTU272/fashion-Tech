@@ -1,0 +1,58 @@
+{
+  "name": "W3: Draft Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-draft",
+        "options": {}
+      },
+      "name": "Webhook (From Retool/Next.js)",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "webhookId": "generate-draft-hook"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a master LinkedIn copywriter. The user has selected topic: {{$json.body.topic}}. Generate 3 hook options, a draft body, and a carousel outline (if applicable) focusing on Code x Craft x Contemporary Design."
+            }
+          ]
+        }
+      },
+      "name": "OpenAI Copywriter",
+      "type": "n8n-nodes-base.openAi",
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "drafts",
+        "dataMode": "define",
+        "values": {
+          "content_idea_id": "={{$json.body.idea_id}}",
+          "carousel_outline": "={{$json.carousel}}",
+          "visual_brief": "={{$json.visuals}}"
+        }
+      },
+      "name": "Save Draft to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "position": [650, 300]
+    }
+  ],
+  "connections": {
+    "Webhook (From Retool/Next.js)": {
+      "main": [
+        [{"node": "OpenAI Copywriter", "type": "main", "index": 0}]
+      ]
+    },
+    "OpenAI Copywriter": {
+      "main": [
+        [{"node": "Save Draft to Supabase", "type": "main", "index": 0}]
+      ]
+    }
+  }
+}
