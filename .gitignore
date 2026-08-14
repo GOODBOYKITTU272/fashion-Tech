@@ -1,0 +1,40 @@
+# Pranavi Fashion Content Engine — Root .gitignore
+
+# Secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+
+# Supabase temp files — contain infra details, not secrets but not needed in repo
+supabase/.temp/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next.js build output
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/next-env.d.ts
+frontend/*.tsbuildinfo
+
+# Vercel
+.vercel
+
+# Python (Agent Reach)
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
