@@ -17,6 +17,7 @@ export interface PipelineExecutionTrace {
   id_trace: {
     research_signal_id: string | null
     topic_cluster_id: string | null
+    topic_score_id: string | null
     draft_id: string | null
     calendar_id: string | null
     publishing_attempt_id: string | null
@@ -34,7 +35,7 @@ export interface PipelineExecutionTrace {
 /**
  * runProductionPipeline
  * Master production pipeline orchestrator running on Vercel Serverless.
- * Executes W1 -> W6 dry-run in a single traceable run without requiring any local laptop process.
+ * Executes W1 -> W6 dry-run in a single traceable run using OpenRouter + Gemini 3.5 Flash.
  * Fully fail-closed with persisted run history in public.pipeline_runs.
  */
 export async function runProductionPipeline(userId: string): Promise<PipelineExecutionTrace> {
@@ -74,6 +75,7 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
     id_trace: {
       research_signal_id: null,
       topic_cluster_id: null,
+      topic_score_id: null,
       draft_id: null,
       calendar_id: null,
       publishing_attempt_id: null
@@ -82,7 +84,10 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
   }
 
   const updateDbRun = async (updates: Record<string, any>) => {
-    await admin.from('pipeline_runs').update(updates).eq('id', runId)
+    const { error: updErr } = await admin.from('pipeline_runs').update(updates).eq('id', runId)
+    if (updErr) {
+      console.error(`Fail-closed DB write error updating pipeline_runs record ${runId}:`, updErr)
+    }
   }
 
   try {
@@ -96,14 +101,12 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
     trace.stage_results.w1_ingestion = w1Result
 
     // ==================================================
-    // STAGE W2: PROCESS & SCORE UNPROCESSED SIGNALS
+    // STAGE W2: PROCESS & SCORE UNPROCESSED SIGNALS STRICTLY
     // ==================================================
     trace.current_stage = 'W2_SCORING'
     await updateDbRun({ current_stage: 'W2_SCORING' })
 
-    // Fetch latest unprocessed signal from public.research_signals
-    let targetSignal: any = null
-
+    // Query strictly for unprocessed research signals (processed = false)
     const { data: unprocessedSignals } = await admin
       .from('research_signals')
       .select('*')
@@ -111,24 +114,10 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
       .order('captured_at', { ascending: false })
       .limit(1)
 
-    if (unprocessedSignals && unprocessedSignals.length > 0) {
-      targetSignal = unprocessedSignals[0]
-    } else {
-      const { data: latestSignals } = await admin
-        .from('research_signals')
-        .select('*')
-        .order('captured_at', { ascending: false })
-        .limit(1)
-
-      if (latestSignals && latestSignals.length > 0) {
-        targetSignal = latestSignals[0]
-      }
-    }
-
-    if (!targetSignal) {
+    if (!unprocessedSignals || unprocessedSignals.length === 0) {
       trace.status = 'BLOCKED'
       trace.error_code = 'NO_ELIGIBLE_SIGNAL'
-      trace.failure_reason = 'No research signals found in database for pipeline evaluation.'
+      trace.failure_reason = 'No unprocessed research signals found in database for pipeline evaluation.'
       trace.completed_at = new Date().toISOString()
       await updateDbRun({
         status: 'BLOCKED',
@@ -139,10 +128,10 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
       return trace
     }
 
-    const signal = targetSignal
+    const signal = unprocessedSignals[0]
     trace.id_trace.research_signal_id = signal.id
 
-    // Call W2 scoreTopic (Strict fail-closed on AI failure)
+    // Call W2 scoreTopic via OpenRouter Gemini 3.5 Flash
     const scoreResult = await scoreTopic(signal.title, signal.summary || '')
 
     // Create topic_clusters record
@@ -163,39 +152,62 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
 
     trace.id_trace.topic_cluster_id = cluster.id
 
-    // Persist topic_scores record
-    await admin.from('topic_scores').insert({
-      cluster_id: cluster.id,
-      freshness_score: scoreResult.freshness_score,
-      source_trust_score: scoreResult.source_trust_score,
-      us_relevance_score: scoreResult.us_relevance_score,
-      uk_relevance_score: scoreResult.uk_relevance_score,
-      pranavi_alignment_score: scoreResult.pranavi_alignment_score,
-      total_opportunity_score: scoreResult.total_opportunity_score,
-      scored_by_model: 'openai'
-    })
+    // Persist topic_scores record with truthful model metadata
+    const modelMetadata = `${scoreResult.provider}/${scoreResult.model}`
+    const { data: topicScoreRow, error: scoreErr } = await admin
+      .from('topic_scores')
+      .insert({
+        cluster_id: cluster.id,
+        freshness_score: scoreResult.freshness_score,
+        source_trust_score: scoreResult.source_trust_score,
+        us_relevance_score: scoreResult.us_relevance_score,
+        uk_relevance_score: scoreResult.uk_relevance_score,
+        pranavi_alignment_score: scoreResult.pranavi_alignment_score,
+        total_opportunity_score: scoreResult.total_opportunity_score,
+        scored_by_model: modelMetadata
+      })
+      .select()
+      .single()
+
+    if (scoreErr || !topicScoreRow) {
+      throw new Error(`Failed to persist topic_scores: ${scoreErr?.message}`)
+    }
+
+    trace.id_trace.topic_score_id = topicScoreRow.id
 
     // Mark signal as processed
     await admin.from('research_signals').update({ processed: true }).eq('id', signal.id)
 
     trace.stage_results.w2_scoring = {
+      provider: scoreResult.provider,
+      model: scoreResult.model,
       signal_id: signal.id,
       cluster_id: cluster.id,
+      topic_score_id: topicScoreRow.id,
+      score_breakdown: {
+        freshness: scoreResult.freshness_score,
+        source_trust: scoreResult.source_trust_score,
+        us_relevance: scoreResult.us_relevance_score,
+        uk_relevance: scoreResult.uk_relevance_score,
+        pranavi_alignment: scoreResult.pranavi_alignment_score
+      },
       total_opportunity_score: scoreResult.total_opportunity_score,
+      classification: scoreResult.classification,
       recommended_pillar: scoreResult.recommended_pillar,
       recommended_format: scoreResult.recommended_format
     }
 
     await updateDbRun({
       research_signal_id: signal.id,
-      topic_cluster_id: cluster.id
+      topic_cluster_id: cluster.id,
+      topic_score_id: topicScoreRow.id
     })
 
-    // Fail-closed check: Ensure topic score meets minimum threshold (>= 70)
-    if (scoreResult.total_opportunity_score < 70) {
+    // Strict score threshold gate: Must be >= 75 (GOOD or HIGH) to proceed automatically
+    if (scoreResult.total_opportunity_score < 75) {
       trace.status = 'BLOCKED'
       trace.error_code = 'SCORE_BELOW_THRESHOLD'
-      trace.failure_reason = `Topic score (${scoreResult.total_opportunity_score}) is below minimum threshold (70).`
+      trace.failure_reason = `Topic score (${scoreResult.total_opportunity_score}) classification '${scoreResult.classification}' is below minimum required threshold (75).`
       trace.completed_at = new Date().toISOString()
       await updateDbRun({
         status: 'BLOCKED',
@@ -242,6 +254,8 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
 
     trace.id_trace.draft_id = draft.id
     trace.stage_results.w3_drafting = {
+      provider: draftResult.provider,
+      model: draftResult.model,
       draft_id: draft.id,
       title: draft.title,
       pillar: draft.pillar,
@@ -281,7 +295,7 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
     }
 
     // ==================================================
-    // STAGE W5: WEEKLY SCHEDULER
+    // STAGE W5: AUTHORITATIVE WEEKLY SCHEDULER
     // ==================================================
     trace.current_stage = 'W5_SCHEDULER'
     await updateDbRun({ current_stage: 'W5_SCHEDULER' })
@@ -289,7 +303,7 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
     const schedulerResult = await runWeeklyScheduler(userId)
     trace.stage_results.w5_scheduler = schedulerResult
 
-    // Query newly created calendar item for this draft
+    // Query calendar item scheduled by W5 for this draft
     const { data: calRows } = await admin
       .from('content_calendar')
       .select('id, planned_date, planned_time, status, quality_gate_status')
@@ -298,31 +312,21 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
       .order('created_at', { ascending: false })
       .limit(1)
 
-    let calendarId = calRows?.[0]?.id
+    const calendarId = calRows?.[0]?.id
 
     if (!calendarId) {
-      // If scheduler candidate pool had existing items, insert direct calendar slot for this verified draft
-      const { data: newCal, error: calInsertErr } = await admin
-        .from('content_calendar')
-        .insert({
-          user_id: userId,
-          draft_id: draft.id,
-          title: draft.title,
-          planned_date: new Date().toISOString().split('T')[0],
-          planned_time: null,
-          pillar: draft.pillar,
-          format: draft.format,
-          status: 'scheduled',
-          quality_gate_status: 'passed',
-          confidence_score: qgResult.confidence_score
-        })
-        .select()
-        .single()
-
-      if (calInsertErr || !newCal) {
-        throw new Error(`Failed to schedule verified draft: ${calInsertErr?.message}`)
-      }
-      calendarId = newCal.id
+      // W5 is authoritative: If W5 scheduler did not schedule this candidate, halt fail-closed
+      trace.status = 'BLOCKED'
+      trace.error_code = 'W5_NO_SLOTS_SCHEDULED'
+      trace.failure_reason = 'W5 Authoritative Scheduler did not schedule candidate into calendar slots.'
+      trace.completed_at = new Date().toISOString()
+      await updateDbRun({
+        status: 'BLOCKED',
+        error_code: trace.error_code,
+        failure_reason: trace.failure_reason,
+        completed_at: trace.completed_at
+      })
+      return trace
     }
 
     trace.id_trace.calendar_id = calendarId
@@ -389,7 +393,7 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
   } catch (err: any) {
     console.error(`Production Pipeline Execution Error at stage ${trace.current_stage}:`, err)
     trace.status = 'FAILED'
-    trace.error_code = err.message?.startsWith('OPENAI_') ? 'OPENAI_UNAVAILABLE' : 'PIPELINE_ERROR'
+    trace.error_code = err.message?.startsWith('OPENROUTER_') ? 'OPENROUTER_UNAVAILABLE' : (err.message?.startsWith('OPENAI_') ? 'OPENAI_UNAVAILABLE' : 'PIPELINE_ERROR')
     trace.failure_reason = err.message || 'Unhandled pipeline execution error'
     trace.completed_at = new Date().toISOString()
 

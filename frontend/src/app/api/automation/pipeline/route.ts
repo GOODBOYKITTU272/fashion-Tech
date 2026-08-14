@@ -3,14 +3,44 @@ import { verifyServerAuthorization } from '@/lib/auth-guard'
 import { runProductionPipeline } from '@/lib/pipeline-orchestrator'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
+function verifyCronSecret(req: Request): boolean {
+  const authHeader = req.headers.get('Authorization')
+  const cronSecret = process.env.CRON_SECRET
+
+  if (!cronSecret || cronSecret.trim() === '') {
+    return false
+  }
+
+  if (authHeader && authHeader === `Bearer ${cronSecret}`) {
+    return true
+  }
+
+  return false
+}
+
 export async function POST(req: Request) {
-  const auth = await verifyServerAuthorization(req)
-  if (!auth.authorized || !auth.userId) {
-    return auth.response || NextResponse.json({ error: '401 Unauthorized' }, { status: 401 })
+  const isCronAuthorized = verifyCronSecret(req)
+  let userId: string | null = null
+
+  if (isCronAuthorized) {
+    const admin = getSupabaseAdmin()
+    const { data: users } = await admin.auth.admin.listUsers()
+    const targetUser = users?.users?.find(u => u.email === 'pranaviyadav57@gmail.com')
+    userId = targetUser?.id || null
+  } else {
+    const auth = await verifyServerAuthorization(req)
+    if (!auth.authorized || !auth.userId) {
+      return auth.response || NextResponse.json({ error: '401 Unauthorized: Invalid or missing authorization token' }, { status: 401 })
+    }
+    userId = auth.userId
+  }
+
+  if (!userId) {
+    return NextResponse.json({ error: '401 Unauthorized: Target user not resolved' }, { status: 401 })
   }
 
   try {
-    const trace = await runProductionPipeline(auth.userId)
+    const trace = await runProductionPipeline(userId)
     return NextResponse.json({
       message: 'Production pipeline execution finished',
       trace
@@ -25,15 +55,15 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
-  // Support Vercel Cron trigger or authorized server call
-  const authHeader = req.headers.get('Authorization')
-  const cronHeader = req.headers.get('x-vercel-cron')
-  
-  if (!cronHeader && (!authHeader || !authHeader.startsWith('Bearer '))) {
-    // If query contains cron trigger bypass from Vercel platform
+  const isCronAuthorized = verifyCronSecret(req)
+
+  if (!isCronAuthorized) {
+    // If not CRON_SECRET authorized, fall back to checking Supabase session authorization
     const auth = await verifyServerAuthorization(req)
-    if (!auth.authorized) {
-      return auth.response || NextResponse.json({ error: '401 Unauthorized' }, { status: 401 })
+    if (!auth.authorized || !auth.userId) {
+      return NextResponse.json({
+        error: '401 Unauthorized: CRON_SECRET or valid Bearer session token is required.'
+      }, { status: 401 })
     }
   }
 
