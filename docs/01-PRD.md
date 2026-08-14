@@ -22,7 +22,7 @@ Human interaction is **exception-based only** (e.g. paused publishing when fact 
 | **Official APIs Only** | Use ONLY official LinkedIn OAuth & approved APIs. NO Selenium, Playwright, cookie stealing, browser scraping, or unofficial bots. |
 | **Carousel Format** | Organic carousels are NOT supported natively by LinkedIn Posts API. In V1, "Carousel" means: AI slide structure → render 6-8 page PDF/document → upload as LinkedIn document asset → publish as an **organic document/PDF carousel-style post**. |
 | **Cost Constraint** | Zero mandatory paid SaaS subscriptions (no Buffer, Hootsuite, Sprout Social, Zapier, Make). Infrastructure remains free/self-hosted. OpenAI API is the approved paid exception. |
-| **User & Scope** | Single-user (Pranavi only). LinkedIn target primary. |
+| **User & Scope** | Single-user private workspace (Pranavi only). Login is restricted exclusively to `pranaviyadav57@gmail.com` via Supabase Passwordless Email OTP. Unknown emails are rejected before OTP dispatch. |
 | **Authenticity Rule** | Never fabricate personal experiences. System uses approved Brand Memory / Personal Memory. If new context is needed, engine automatically selects another publishable topic or flags `NEEDS REVIEW`. |
 | **Safety Guardrails** | Global `AUTO MODE` [ON/OFF] toggle and emergency `PAUSE ALL PUBLISHING`. System auto-pauses on fact-check failure, token expiration, or unverified claims. |
 | **Analytics Truth** | Primary metrics source is official LinkedIn Analytics API. Never invent or estimate unavailable metrics (e.g. USA/UK geography splits if unreturned by API). Unavailable metrics remain `NULL`. CSV upload is fallback/historical only. |

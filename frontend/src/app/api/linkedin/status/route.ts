@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const { data: conn, error: connError } = await supabase
+    const { data: conn } = await supabase
       .from('linkedin_connections')
       .select('id, user_id, linkedin_member_urn, granted_scopes, integration_status, auth_status, expires_at, last_verified_at, reauthorization_required')
       .order('updated_at', { ascending: false })

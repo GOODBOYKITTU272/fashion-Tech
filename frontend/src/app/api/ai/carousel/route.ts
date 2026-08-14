@@ -1,16 +1,14 @@
 import { NextResponse } from 'next/server'
 import { generateCarouselOutline } from '@/lib/ai'
+import { verifyServerAuthorization } from '@/lib/auth-guard'
 
 export async function POST(req: Request) {
+  const auth = await verifyServerAuthorization(req)
+  if (!auth.authorized) {
+    return auth.response!
+  }
+
   try {
-    const authHeader = req.headers.get('authorization')
-    const expectedKey = process.env.N8N_API_KEY
-
-    // Auth check if configured
-    if (expectedKey && authHeader !== `Bearer ${expectedKey}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
     const { postBody, pillar, topicSummary, hookSelected } = await req.json()
     if (!postBody) {
       return NextResponse.json({ error: 'Missing postBody' }, { status: 400 })

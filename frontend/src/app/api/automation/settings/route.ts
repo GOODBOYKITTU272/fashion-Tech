@@ -1,25 +1,22 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { verifyServerAuthorization } from '@/lib/auth-guard'
 
 export async function POST(req: Request) {
+  // Verify authorization
+  const auth = await verifyServerAuthorization(req)
+  if (!auth.authorized) {
+    return auth.response!
+  }
+
   try {
     const body = await req.json()
     const { auto_mode_enabled, pause_all_publishing, min_confidence_score } = body
 
     const admin = getSupabaseAdmin()
 
-    // Resolve owner user_id
-    const { data: usersData } = await admin.auth.admin.listUsers({ page: 1, perPage: 1 })
-    let ownerUserId = usersData?.users?.[0]?.id
-
-    if (!ownerUserId) {
-      const { data: existing } = await admin.from('automation_settings').select('user_id').limit(1)
-      ownerUserId = existing?.[0]?.user_id
-    }
-
-    if (!ownerUserId) {
-      return NextResponse.json({ error: 'No authenticated system user found to update automation settings.' }, { status: 400 })
-    }
+    // Single-user owner user ID: 22ff14e8-10c3-44b8-a77b-1a656e1255ef
+    const ownerUserId = auth.userId || '22ff14e8-10c3-44b8-a77b-1a656e1255ef'
 
     const { data: updated, error } = await admin
       .from('automation_settings')
