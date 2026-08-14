@@ -18,13 +18,14 @@ export interface QualityGateResult {
   voice_check_status: GateCheckStatus
   duplicate_check_status: GateCheckStatus
   personal_context_status: GateCheckStatus
+  visual_asset_status: GateCheckStatus
   confidence_score: number
   failure_reason: string | null
   checked_at: string
 }
 
 export async function runQualityGate(input: QualityGateCheckInput): Promise<QualityGateResult> {
-  const { draftId, title, body, pillar, hasPersonalInput = false } = input
+  const { draftId, title, body, pillar, format, hasPersonalInput = false } = input
   const now = new Date().toISOString()
   const admin = getSupabaseAdmin()
 
@@ -32,6 +33,7 @@ export async function runQualityGate(input: QualityGateCheckInput): Promise<Qual
   let voiceCheckStatus = 'passed' as GateCheckStatus
   let duplicateCheckStatus = 'passed' as GateCheckStatus
   let personalContextStatus = 'passed' as GateCheckStatus
+  let visualAssetStatus = 'passed' as GateCheckStatus
   let confidenceScore = 85
   let failureReason: string | null = null
 
@@ -45,19 +47,26 @@ export async function runQualityGate(input: QualityGateCheckInput): Promise<Qual
     }
   }
 
-  // 2. Duplicate Check — Check recent drafts in database for title similarity
-  try {
-    const { data: existingDrafts } = await admin
-      .from('drafts')
-      .select('id, created_at')
-      .neq('id', draftId)
-      .limit(10)
+  // 2. Visual Asset Quality Check for Image-Required Formats
+  const isImageRequired = ['single_image', 'graphic', 'editorial_graphic', 'image'].includes(format.toLowerCase())
+  if (isImageRequired) {
+    try {
+      const { data: d } = await admin
+        .from('drafts')
+        .select('image_generation_status, image_url')
+        .eq('id', draftId)
+        .single()
 
-    if (existingDrafts && existingDrafts.length > 5) {
-      confidenceScore = Math.max(50, confidenceScore - 5)
+      if (!d || d.image_generation_status !== 'completed' || !d.image_url) {
+        visualAssetStatus = 'failed' as GateCheckStatus
+        failureReason = failureReason || `Format '${format}' requires a completed, persistent image asset. Found status '${d?.image_generation_status || 'none'}'.`
+        confidenceScore = 0
+      }
+    } catch {
+      visualAssetStatus = 'failed' as GateCheckStatus
+      failureReason = failureReason || `Failed to verify visual asset for image-required format '${format}'.`
+      confidenceScore = 0
     }
-  } catch {
-    // Non-fatal duplicate check
   }
 
   // 3. Voice Guidelines Check — Ensure curious, grounded tone
@@ -72,10 +81,10 @@ export async function runQualityGate(input: QualityGateCheckInput): Promise<Qual
   // 4. Overall Quality Gate Status Resolution
   let overallStatus = 'passed' as GateCheckStatus
 
-  if (personalContextStatus === 'needs_input' || voiceCheckStatus === 'needs_input' || factCheckStatus === 'needs_input') {
-    overallStatus = 'needs_input' as GateCheckStatus
-  } else if (personalContextStatus === 'failed' || voiceCheckStatus === 'failed' || factCheckStatus === 'failed' || duplicateCheckStatus === 'failed') {
+  if (visualAssetStatus === 'failed' || personalContextStatus === 'failed' || voiceCheckStatus === 'failed' || factCheckStatus === 'failed' || duplicateCheckStatus === 'failed') {
     overallStatus = 'failed' as GateCheckStatus
+  } else if (visualAssetStatus === 'needs_input' || personalContextStatus === 'needs_input' || voiceCheckStatus === 'needs_input' || factCheckStatus === 'needs_input') {
+    overallStatus = 'needs_input' as GateCheckStatus
   }
 
   const result: QualityGateResult = {
@@ -85,6 +94,7 @@ export async function runQualityGate(input: QualityGateCheckInput): Promise<Qual
     voice_check_status: voiceCheckStatus,
     duplicate_check_status: duplicateCheckStatus,
     personal_context_status: personalContextStatus,
+    visual_asset_status: visualAssetStatus,
     confidence_score: confidenceScore,
     failure_reason: failureReason,
     checked_at: now
