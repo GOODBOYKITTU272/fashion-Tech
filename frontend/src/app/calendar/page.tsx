@@ -1,3 +1,8 @@
+'use client'
+
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const PILLARS = [
   { label: 'Educational', color: 'var(--primary)', bg: 'var(--primary-dim)' },
@@ -30,6 +35,7 @@ const PILLAR_COLOR: Record<string, string> = {
 }
 
 export default function CalendarPage() {
+  const router = useRouter()
   const weekStart = new Date()
   // get Monday
   const day = weekStart.getDay()
@@ -45,6 +51,14 @@ export default function CalendarPage() {
   const mix = { Educational: 0, Storytelling: 0, 'Soft Selling': 0 }
   SAMPLE_WEEK.forEach(d => { if (d.post) mix[d.post.pillar as keyof typeof mix]++ })
 
+  const handleCardClick = (post: { title: string; pillar: string } | null) => {
+    if (post) {
+      router.push(`/editor?title=${encodeURIComponent(post.title)}&pillar=${encodeURIComponent(post.pillar)}`)
+    } else {
+      router.push('/editor')
+    }
+  }
+
   return (
     <div className="page">
       <div className="page-header">
@@ -52,7 +66,9 @@ export default function CalendarPage() {
           <h1 className="page-title">Content Calendar</h1>
           <p className="page-subtitle">This week&apos;s plan — {totalPosts}/4 posts scheduled</p>
         </div>
-        <button className="btn btn-primary btn-sm">+ Add Post</button>
+        <Link href="/editor" className="btn btn-primary btn-sm">
+          + Add Post
+        </Link>
       </div>
 
       {/* Weekly Mix */}
@@ -79,10 +95,23 @@ export default function CalendarPage() {
       <div className="card card-pad" style={{ overflowX: 'auto' }}>
         <div className="cal-grid">
           {DAYS.map((d, i) => (
-            <div key={d} className="cal-day-header">{d}<br /><span style={{ fontWeight: 400, color: 'var(--text-3)' }}>{dates[i]}</span></div>
+            <div key={d} className="cal-day-header">
+              {d}<br />
+              <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>{dates[i]}</span>
+            </div>
           ))}
           {SAMPLE_WEEK.map((slot, i) => (
-            <div key={i} className={`cal-slot ${slot.post ? 'has-post' : ''}`}>
+            <div
+              key={i}
+              onClick={() => handleCardClick(slot.post)}
+              className={`cal-slot ${slot.post ? 'has-post' : ''}`}
+              style={{
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                userSelect: 'none'
+              }}
+              title={slot.post ? `Edit: ${slot.post.title}` : 'Add new post for this day'}
+            >
               {slot.post ? (
                 <>
                   <p style={{ fontSize: '0.7rem', fontWeight: 700, color: PILLAR_COLOR[slot.post.pillar], marginBottom: '0.25rem' }}>
@@ -96,7 +125,14 @@ export default function CalendarPage() {
                   </span>
                 </>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-3)', fontSize: '1.5rem' }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  height: '100%',
+                  color: 'var(--text-3)',
+                  fontSize: '1.5rem'
+                }}>
                   +
                 </div>
               )}
@@ -105,11 +141,22 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {/* Mobile list view */}
+      {/* Post List view */}
       <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         <h2 className="section-title">Post List</h2>
         {SAMPLE_WEEK.filter(s => s.post).map((slot, i) => (
-          <div key={i} className="card card-pad-sm" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <div
+            key={i}
+            onClick={() => handleCardClick(slot.post)}
+            className="card card-pad-sm"
+            style={{
+              display: 'flex',
+              gap: '0.75rem',
+              alignItems: 'center',
+              cursor: 'pointer',
+              transition: 'transform 0.15s ease, border-color 0.15s ease'
+            }}
+          >
             <div style={{ width: '40px', textAlign: 'center' }}>
               <p style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 600 }}>{slot.day}</p>
             </div>
@@ -120,7 +167,15 @@ export default function CalendarPage() {
                 <span style={{ fontSize: '0.72rem', color: PILLAR_COLOR[slot.post!.pillar] }}>{slot.post!.pillar}</span>
               </div>
             </div>
-            <button className="btn btn-ghost btn-sm">Edit</button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleCardClick(slot.post)
+              }}
+              className="btn btn-ghost btn-sm"
+            >
+              Edit
+            </button>
           </div>
         ))}
       </div>
