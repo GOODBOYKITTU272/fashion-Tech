@@ -14,25 +14,35 @@ export async function POST(req: Request) {
     if (!apiKey || apiKey.startsWith('your-')) {
       return NextResponse.json({
         success: false,
-        zernio_analytics_supported: 'NO',
+        zernio_analytics_supported: 'UNKNOWN_AUTH_ERROR',
+        eligible_count: 0,
+        success_count: 0,
+        failed_count: 0,
         error: 'Zernio API key is not configured.'
-      }, { status: 200 }) // Fail gracefully with status 200 as requested
+      }, { status: 200 }) // Fail gracefully
     }
 
     const admin = getSupabaseAdmin()
 
-    // 2. Fetch successful publishing attempts with Zernio post IDs
+    // 2. Fetch successful publishing attempts with Zernio post IDs (User Scoped)
     const { data: attempts, error: attError } = await admin
       .from('publishing_attempts')
       .select('id, calendar_id, published_post_id, response_metadata')
+      .eq('user_id', auth.userId)
       .eq('status', 'LIVE_SUCCESS')
 
     if (attError) throw attError
 
-    // 3. Fetch CSV-imported published posts with Zernio post IDs
+    // 3. Fetch CSV-imported published posts with Zernio post IDs (User Scoped via join)
     const { data: csvPosts, error: csvError } = await admin
       .from('published_posts')
-      .select('id, calendar_id, native_post_id, linkedin_post_url')
+      .select(`
+        id, calendar_id, native_post_id, linkedin_post_url,
+        content_calendar!inner (
+          user_id
+        )
+      `)
+      .eq('content_calendar.user_id', auth.userId)
 
     if (csvError) throw csvError
 
@@ -50,7 +60,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // Map successful publishing attempts (ensure published_posts row exists)
+    // Map successful publishing attempts
     if (attempts) {
       for (const att of attempts) {
         const metadata = (att.response_metadata as any) || {}
@@ -60,7 +70,6 @@ export async function POST(req: Request) {
         let publishedPostId = att.published_post_id
 
         if (!publishedPostId) {
-          // Check if published_post row already exists for this calendar item
           const { data: existingPost } = await admin
             .from('published_posts')
             .select('id')
@@ -70,7 +79,6 @@ export async function POST(req: Request) {
           if (existingPost) {
             publishedPostId = existingPost.id
           } else {
-            // Create published_posts record
             const { data: newPost, error: insertPostErr } = await admin
               .from('published_posts')
               .insert({
@@ -83,7 +91,6 @@ export async function POST(req: Request) {
 
             if (!insertPostErr && newPost) {
               publishedPostId = newPost.id
-              // Link attempt to published post
               await admin
                 .from('publishing_attempts')
                 .update({ published_post_id: publishedPostId })
@@ -102,9 +109,11 @@ export async function POST(req: Request) {
     }
 
     let syncCount = 0
+    let failedCount = 0
+    let authError = false
     const errors: string[] = []
 
-    // 4. For each unique Zernio post, fetch metrics from Zernio API and update DB
+    // 4. For each unique Zernio post, fetch metrics
     for (const post of postsToSync) {
       try {
         const zernioRes = await fetch(`https://api.zernio.com/v1/analytics/${post.zernioPostId}`, {
@@ -114,14 +123,27 @@ export async function POST(req: Request) {
           }
         })
 
+        if (zernioRes.status === 401 || zernioRes.status === 403) {
+          authError = true
+          failedCount++
+          errors.push(`Zernio authentication failed for post ${post.zernioPostId}`)
+          continue
+        }
+
         if (!zernioRes.ok) {
+          failedCount++
           throw new Error(`Zernio responded with status ${zernioRes.status}`)
         }
 
         const data = await zernioRes.json()
+        
+        if (!data || (typeof data !== 'object')) {
+          failedCount++
+          throw new Error(`Invalid schema returned from Zernio analytics API`)
+        }
+
         const metrics = data.metrics || data || {}
 
-        // Ensure we ONLY capture fields that actually exist in the Zernio response, avoiding inventing zeros
         const impressions = metrics.impressions !== undefined || metrics.views !== undefined
           ? Number(metrics.impressions !== undefined ? metrics.impressions : metrics.views)
           : null
@@ -133,7 +155,6 @@ export async function POST(req: Request) {
           ? Number(metrics.reposts !== undefined ? metrics.reposts : metrics.shares)
           : null
 
-        // Insert fresh snapshot into post_metrics
         await admin
           .from('post_metrics')
           .insert({
@@ -151,10 +172,19 @@ export async function POST(req: Request) {
       }
     }
 
+    let supportStatus = 'UNKNOWN_NO_ELIGIBLE_POST'
+    if (postsToSync.length > 0) {
+      if (syncCount > 0) supportStatus = 'YES'
+      else if (authError) supportStatus = 'UNKNOWN_AUTH_ERROR'
+      else supportStatus = 'NO'
+    }
+
     return NextResponse.json({
       success: true,
-      zernio_analytics_supported: 'YES',
-      sync_count: syncCount,
+      zernio_analytics_supported: supportStatus,
+      eligible_count: postsToSync.length,
+      success_count: syncCount,
+      failed_count: failedCount,
       errors: errors.length > 0 ? errors : undefined
     })
 

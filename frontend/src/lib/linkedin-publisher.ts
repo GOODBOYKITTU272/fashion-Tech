@@ -130,6 +130,7 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
     const { data: conflicts } = await admin
       .from('content_calendar')
       .select('id, source, status, external_status')
+      .eq('user_id', userId)
       .eq('planned_date', calItem.planned_date)
       .eq('planned_time', calItem.planned_time)
       .neq('id', calendarId)
