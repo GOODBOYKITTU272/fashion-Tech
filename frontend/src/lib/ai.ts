@@ -39,20 +39,58 @@ function validateScoreField(fieldValue: any, fieldName: string): number {
   return num
 }
 
-// Call configured AI provider
+// Call configured AI provider (OpenAI / OpenRouter / Gemini)
 async function callModel(systemPrompt: string, userPrompt: string, jsonMode = false): Promise<string> {
   const provider = process.env.AI_PROVIDER || 'openai'
+  const openrouterKey = process.env.OPENROUTER_API_KEY
+  const openaiKey = process.env.OPENAI_API_KEY
+
+  // Determine active key & endpoint (auto-route sk-or-v1- keys to OpenRouter API)
+  const isOpenRouterKey = openrouterKey || (openaiKey && openaiKey.startsWith('sk-or-v1-'))
+  const activeKey = openrouterKey || openaiKey
+
+  if (isOpenRouterKey && activeKey) {
+    const modelName = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${activeKey}`,
+        'HTTP-Referer': 'https://fashion-tech-delta.vercel.app',
+        'X-Title': 'Pranavi Fashion Tech Content Engine'
+      },
+      body: JSON.stringify({
+        model: modelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        response_format: jsonMode ? { type: 'json_object' } : undefined,
+        temperature: 0.7
+      })
+    })
+
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`OPENAI_UNAVAILABLE: OpenRouter API error (HTTP ${res.status}): ${err}`)
+    }
+    const data = await res.json()
+    const content = data.choices?.[0]?.message?.content
+    if (!content) {
+      throw new Error('OPENAI_UNAVAILABLE: OpenRouter returned empty completion content')
+    }
+    return content
+  }
   
   if (provider === 'openai') {
-    const apiKey = process.env.OPENAI_API_KEY
-    if (!apiKey || apiKey.startsWith('your-')) {
+    if (!openaiKey || openaiKey.startsWith('your-')) {
       throw new Error('OPENAI_UNAVAILABLE: OpenAI API key is not configured in environment')
     }
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        'Authorization': `Bearer ${openaiKey}`
       },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
