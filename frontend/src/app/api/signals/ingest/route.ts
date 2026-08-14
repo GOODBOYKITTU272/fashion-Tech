@@ -12,16 +12,17 @@ export async function POST(req: Request) {
     const result = await runAgentReachW1Ingestion(auth.userId)
 
     return NextResponse.json({
-      message: 'Agent Reach W1 research signal ingestion completed',
-      agent_reach_status: 'LOCAL_READY',
-      connector: 'Agent Reach (Jina Web Reader & Safe RSS)',
+      message: 'Research signal ingestion completed via safe HTTP connectors',
       ...result
     })
   } catch (error: any) {
     console.error('API /api/signals/ingest Exception:', error)
     return NextResponse.json({
       error: error.message || 'Signal ingestion failed',
-      agent_reach_status: 'ERROR'
+      ingestion_status: 'ERROR',
+      runtime: 'SAFE_HTTP_CONNECTORS',
+      agent_reach_local_status: 'READY',
+      agent_reach_production_status: 'NOT_DEPLOYED'
     }, { status: 500 })
   }
 }

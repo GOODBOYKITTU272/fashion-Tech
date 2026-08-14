@@ -129,7 +129,7 @@ export default function TodayPage() {
             className="btn btn-primary btn-sm"
             onClick={handleTriggerIngestion}
           >
-            {ingestLoading ? 'Fetching Signals...' : '👁️ Run Agent Reach W1'}
+            {ingestLoading ? 'Syncing...' : '🔄 Sync Research Sources'}
           </button>
         </div>
       </div>
@@ -148,10 +148,13 @@ export default function TodayPage() {
               linkedinState?.integration_status === 'CONNECTED' ? 'badge-green' :
               linkedinState?.integration_status === 'REAUTH_REQUIRED' ? 'badge-yellow' : 'badge-gray'
             }`}>
-              LINKEDIN: {linkedinState?.integration_status || 'WAITING_FOR_API_ACCESS'}
+              LIVE TRANSPORT: NOT SELECTED
             </span>
             <span className="badge badge-blue">
-              RESEARCH CONNECTOR: AGENT REACH (LOCAL READY)
+              RESEARCH INGESTION: SAFE HTTP READY
+            </span>
+            <span className="badge badge-gray">
+              AGENT REACH CLI: LOCAL ONLY
             </span>
           </div>
 
@@ -165,7 +168,7 @@ export default function TodayPage() {
       {ingestResult && (
         <div className="card card-pad-sm" style={{ marginBottom: '1.5rem', background: ingestResult.success ? 'var(--green-dim)' : 'var(--accent-dim)', borderColor: 'var(--border)' }}>
           <p style={{ fontWeight: 600, fontSize: '0.85rem', color: ingestResult.success ? 'var(--green)' : 'var(--accent)' }}>
-            👁️ Agent Reach W1 Ingestion Result: {ingestResult.success ? 'Success' : 'Partial / Failed'}
+            📡 Research Signal Ingestion Result: {ingestResult.success ? 'Success' : 'Partial / Failed'} ({ingestResult.runtime})
           </p>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-2)', marginTop: '0.25rem' }}>
             Discovered: <strong>{ingestResult.signals_discovered ?? 0}</strong> | Inserted: <strong>{ingestResult.signals_inserted ?? 0}</strong> | Deduplicated: <strong>{ingestResult.signals_deduplicated ?? 0}</strong>
@@ -277,7 +280,7 @@ export default function TodayPage() {
           No new unprocessed research signals
         </h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-2)', maxWidth: '420px', margin: '0 auto' }}>
-          Agent Reach (Local Microservice) acquires safe fashion technology, Indian craftsmanship, and textile signals into Supabase. Click <strong>Run Agent Reach W1</strong> to trigger ingestion.
+          Research signal ingestion acquires safe fashion technology, Indian craftsmanship, and textile signals into Supabase. Click <strong>Sync Research Sources</strong> to trigger acquisition.
         </p>
       </div>
     </div>

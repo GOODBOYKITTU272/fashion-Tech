@@ -15,6 +15,10 @@ export interface CanonicalResearchSignal {
 
 export interface IngestionResult {
   success: boolean
+  ingestion_status: string
+  runtime: 'SAFE_HTTP_CONNECTORS'
+  agent_reach_local_status: 'READY'
+  agent_reach_production_status: 'NOT_DEPLOYED'
   signals_discovered: number
   signals_inserted: number
   signals_deduplicated: number
@@ -42,6 +46,26 @@ const SAFE_FASHION_RSS_FEEDS = [
 ]
 
 /**
+ * parsePublishedAt
+ * Safely parses raw publication date strings.
+ * Returns ISO string if valid, or NULL if missing/invalid.
+ * NEVER substitutes current discovery time for missing publication dates.
+ */
+export function parsePublishedAt(rawDate?: string | null): string | null {
+  if (!rawDate || typeof rawDate !== 'string') return null
+  const cleaned = rawDate.replace(/<[^>]+>/g, '').trim()
+  if (!cleaned) return null
+
+  try {
+    const d = new Date(cleaned)
+    if (isNaN(d.getTime())) return null
+    return d.toISOString()
+  } catch {
+    return null
+  }
+}
+
+/**
  * generateFingerprint
  * Computes stable hash based on normalized URL + title
  */
@@ -53,7 +77,7 @@ export function generateFingerprint(sourceUrl: string, title: string): string {
 
 /**
  * fetchJinaWebReader
- * Uses Agent Reach / Jina Reader zero-config endpoint to extract markdown content from any public webpage safely without cookies.
+ * Uses Jina Reader safe zero-config HTTP adapter to extract markdown content from any public webpage without cookies.
  */
 export async function fetchJinaWebReader(targetUrl: string): Promise<{ title: string; content: string } | null> {
   try {
@@ -61,7 +85,7 @@ export async function fetchJinaWebReader(targetUrl: string): Promise<{ title: st
     const res = await fetch(jinaUrl, {
       headers: {
         'Accept': 'text/plain',
-        'User-Agent': 'AgentReach-Reader/1.5'
+        'User-Agent': 'SafeHTTP-Reader/1.5'
       }
     })
 
@@ -83,7 +107,8 @@ export async function fetchJinaWebReader(targetUrl: string): Promise<{ title: st
 
 /**
  * runAgentReachW1Ingestion
- * Master W1 ingestion workflow querying safe connectors (RSS & Web Reader), normalizing signal format, deduplicating, and persisting into public.research_signals.
+ * Master W1 ingestion workflow using safe HTTP adapters (RSS & Jina Web Reader).
+ * Normalizes signals, strictly parses publication dates (without fabrication), deduplicates by URL and fingerprint, and persists into public.research_signals.
  */
 export async function runAgentReachW1Ingestion(userId: string): Promise<IngestionResult> {
   const resultSignals: CanonicalResearchSignal[] = []
@@ -95,6 +120,10 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
   if (!userId) {
     return {
       success: false,
+      ingestion_status: 'BLOCKED',
+      runtime: 'SAFE_HTTP_CONNECTORS',
+      agent_reach_local_status: 'READY',
+      agent_reach_production_status: 'NOT_DEPLOYED',
       signals_discovered: 0,
       signals_inserted: 0,
       signals_deduplicated: 0,
@@ -108,7 +137,7 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
   // 1. Ingest from Safe RSS Feeds
   for (const feed of SAFE_FASHION_RSS_FEEDS) {
     try {
-      const res = await fetch(feed.url, { headers: { 'User-Agent': 'AgentReach-RSS/1.5' } })
+      const res = await fetch(feed.url, { headers: { 'User-Agent': 'SafeHTTP-RSS/1.5' } })
       if (!res.ok) {
         errors.push(`Failed to fetch RSS feed ${feed.name}: HTTP ${res.status}`)
         continue
@@ -134,13 +163,15 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
         discoveredCount++
 
         const summary = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').substring(0, 400).trim() : null
-        const pubDate = pubDateMatch ? new Date(pubDateMatch[1]).toISOString() : new Date().toISOString()
+        const publishedAt = parsePublishedAt(pubDateMatch ? pubDateMatch[1] : null)
+        const discoveredAt = new Date().toISOString()
+        const fingerprint = generateFingerprint(link, title)
 
-        // Deduplication Check in public.research_signals using URL
+        // Deduplication Check in public.research_signals using URL and Fingerprint
         const { data: existing } = await admin
           .from('research_signals')
           .select('id')
-          .eq('url', link)
+          .or(`url.eq.${link},fingerprint.eq.${fingerprint}`)
           .limit(1)
 
         if (existing && existing.length > 0) {
@@ -153,27 +184,36 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           source_url: link,
           title,
           summary,
-          published_at: pubDate,
-          discovered_at: new Date().toISOString(),
+          published_at: publishedAt,
+          discovered_at: discoveredAt,
           category: feed.category,
           raw_text: summary,
           source_type: 'rss'
         }
 
-        // Insert persistent research signal
+        // Insert persistent research signal into public.research_signals
         const { error: insertErr } = await admin.from('research_signals').insert({
+          source_name: signal.source_name,
+          source_type: signal.source_type,
           url: signal.source_url,
           title: signal.title,
           summary: signal.summary,
           raw_content: signal.raw_text,
           category: signal.category,
+          published_at: signal.published_at,
           captured_at: signal.discovered_at,
+          fingerprint,
           processed: false
         })
 
         if (insertErr) {
-          console.error(`Failed to insert signal ${title}:`, insertErr)
-          errors.push(`Database insert failed for ${title}: ${insertErr.message}`)
+          // If unique constraint collision occurs on fingerprint
+          if (insertErr.code === '23505') {
+            deduplicatedCount++
+          } else {
+            console.error(`Failed to insert signal ${title}:`, insertErr)
+            errors.push(`Database insert failed for ${title}: ${insertErr.message}`)
+          }
         } else {
           insertedCount++
           resultSignals.push(signal)
@@ -185,7 +225,11 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
   }
 
   return {
-    success: errors.length === 0 || insertedCount > 0,
+    success: errors.length === 0 || insertedCount > 0 || deduplicatedCount > 0,
+    ingestion_status: 'READY',
+    runtime: 'SAFE_HTTP_CONNECTORS',
+    agent_reach_local_status: 'READY',
+    agent_reach_production_status: 'NOT_DEPLOYED',
     signals_discovered: discoveredCount,
     signals_inserted: insertedCount,
     signals_deduplicated: deduplicatedCount,
