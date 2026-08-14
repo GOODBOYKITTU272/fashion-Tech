@@ -9,7 +9,7 @@ export interface ScoringResult {
   pranavi_alignment_score: number
   total_opportunity_score: number
   reasoning: string
-  recommended_pillar: string
+  recommended_pillar: 'Educational' | 'Storytelling' | 'Soft Selling'
   recommended_format: string
 }
 
@@ -20,6 +20,14 @@ export interface DraftResult {
   pillar: string
   format: string
   pdf_url?: string
+}
+
+export function normalizePillar(inputPillar?: string): 'Educational' | 'Storytelling' | 'Soft Selling' {
+  if (!inputPillar) return 'Educational'
+  const p = inputPillar.toLowerCase()
+  if (p.includes('story') || p.includes('brand') || p.includes('craft') || p.includes('evolution')) return 'Storytelling'
+  if (p.includes('sell') || p.includes('product') || p.includes('conversion') || p.includes('market')) return 'Soft Selling'
+  return 'Educational'
 }
 
 async function readPromptFile(filename: string): Promise<string> {
@@ -147,12 +155,11 @@ async function callModel(systemPrompt: string, userPrompt: string, jsonMode = fa
 /**
  * scoreTopic
  * Evaluates topic relevance using LLM.
- * Strictly validates all score fields (0-100).
- * Fails closed on any API error or missing/malformed score. ZERO synthetic fallbacks.
+ * Strictly validates all score fields (0-100). Normalizes recommended_pillar to schema check constraint.
  */
 export async function scoreTopic(title: string, summary: string): Promise<ScoringResult> {
   const promptTemplate = await readPromptFile('topic-scoring.md')
-  const systemPrompt = promptTemplate || 'Score this topic for relevance. Return JSON object with numeric scores between 0 and 100 for freshness_score, source_trust_score, us_relevance_score, uk_relevance_score, pranavi_alignment_score, total_opportunity_score, and string fields reasoning, recommended_pillar, recommended_format.'
+  const systemPrompt = promptTemplate || 'Score this topic for relevance. Return JSON object with numeric scores between 0 and 100 for freshness_score, source_trust_score, us_relevance_score, uk_relevance_score, pranavi_alignment_score, total_opportunity_score, and string fields reasoning, recommended_pillar (one of Educational, Storytelling, Soft Selling), recommended_format.'
   const userPrompt = JSON.stringify({ title, summary })
 
   const rawResponse = await callModel(systemPrompt, userPrompt, true)
@@ -187,7 +194,7 @@ export async function scoreTopic(title: string, summary: string): Promise<Scorin
     pranavi_alignment_score,
     total_opportunity_score,
     reasoning: data.reasoning,
-    recommended_pillar: String(data.recommended_pillar || 'Educational'),
+    recommended_pillar: normalizePillar(data.recommended_pillar),
     recommended_format: String(data.recommended_format || 'carousel')
   }
 }
@@ -198,8 +205,9 @@ export async function scoreTopic(title: string, summary: string): Promise<Scorin
  * Fails closed on any API error or missing content. ZERO synthetic copy fabrication.
  */
 export async function generateDraft(title: string, summary: string, pillar = 'Educational', format = 'carousel', personalInput = ''): Promise<DraftResult> {
-  const systemPrompt = `You are an expert fashion-tech content creator for Pranavi (Positioning: Code × Craft × Contemporary Design). Generate a high-quality ${format} draft on pillar '${pillar}'. Return JSON with keys: title, hook, full_content, pillar, format.`
-  const userPrompt = JSON.stringify({ title, summary, pillar, format, personalInput })
+  const normPillar = normalizePillar(pillar)
+  const systemPrompt = `You are an expert fashion-tech content creator for Pranavi (Positioning: Code × Craft × Contemporary Design). Generate a high-quality ${format} draft on pillar '${normPillar}'. Return JSON with keys: title, hook, full_content, pillar, format.`
+  const userPrompt = JSON.stringify({ title, summary, pillar: normPillar, format, personalInput })
 
   const rawResponse = await callModel(systemPrompt, userPrompt, true)
   let data: any
@@ -217,7 +225,7 @@ export async function generateDraft(title: string, summary: string, pillar = 'Ed
     title: String(data.title).trim(),
     hook: String(data.hook).trim(),
     full_content: String(data.full_content).trim(),
-    pillar: String(data.pillar || pillar).trim(),
+    pillar: normalizePillar(data.pillar || normPillar),
     format: String(data.format || format).trim()
   }
 }
@@ -228,7 +236,7 @@ export async function generateDraft(title: string, summary: string, pillar = 'Ed
  */
 export async function generateCarouselOutline(postBody: string, pillar = 'Educational', topicSummary = '', hookSelected = ''): Promise<any> {
   const systemPrompt = 'Generate a 5-slide carousel outline for LinkedIn. Return JSON object with title, slides array (with slide_no, headline, text), cta.'
-  const userPrompt = JSON.stringify({ postBody, pillar, topicSummary, hookSelected })
+  const userPrompt = JSON.stringify({ postBody, pillar: normalizePillar(pillar), topicSummary, hookSelected })
 
   const rawResponse = await callModel(systemPrompt, userPrompt, true)
   let data: any
