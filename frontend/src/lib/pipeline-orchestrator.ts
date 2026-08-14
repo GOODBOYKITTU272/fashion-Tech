@@ -203,11 +203,12 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
       topic_score_id: topicScoreRow.id
     })
 
-    // Strict score threshold gate: Must be >= 75 (GOOD or HIGH) to proceed automatically
-    if (scoreResult.total_opportunity_score < 75) {
+    // Strict score threshold gate: Must be >= 75 AND positioning_fit_score >= 75 to proceed automatically
+    const positioningFit = signal.positioning_fit_score || 0
+    if (scoreResult.total_opportunity_score < 75 || positioningFit < 75) {
       trace.status = 'BLOCKED'
       trace.error_code = 'SCORE_BELOW_THRESHOLD'
-      trace.failure_reason = `Topic score (${scoreResult.total_opportunity_score}) classification '${scoreResult.classification}' is below minimum required threshold (75).`
+      trace.failure_reason = `Topic opportunity score (${scoreResult.total_opportunity_score}) or positioning fit score (${positioningFit}) is below minimum required threshold (75) for autonomous content generation.`
       trace.completed_at = new Date().toISOString()
       await updateDbRun({
         status: 'BLOCKED',
@@ -218,8 +219,6 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
       return trace
     }
 
-    // ==================================================
-    // STAGE W3: DRAFT GENERATION (TEXT + IMAGE SPLIT)
     // ==================================================
     trace.current_stage = 'W3_DRAFTING'
     await updateDbRun({ current_stage: 'W3_DRAFTING' })

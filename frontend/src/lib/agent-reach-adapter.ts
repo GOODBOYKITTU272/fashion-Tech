@@ -19,6 +19,8 @@ export interface CanonicalResearchSignal {
   trust_score: number
   relevance_status?: 'accepted' | 'rejected' | 'failed'
   relevance_score?: number
+  positioning_fit_score?: number
+  why_it_matters_to_pranavi?: string | null
   topic_family?: string
   relevance_reason?: string
   research_run_id?: string
@@ -129,11 +131,11 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
   let rejectedCount = 0
   let deduplicatedCount = 0
 
-  const sourceStatuses: Record<string, string> = {
-    rss: 'configured',
-    reddit: 'configured',
-    linkedin_public: 'configured',
-    twitter_x: 'auth_required'
+  const sourceStatuses: Record<string, any> = {
+    rss: { status: 'configured', transport: 'RSS_HTTP' },
+    reddit: { status: 'configured', transport: 'REDDIT_JSON' },
+    linkedin_public: { status: 'configured', transport: 'JINA_SEARCH' },
+    twitter_x: { status: 'auth_required', transport: 'TWITTER_API' }
   }
 
   if (!userId) {
@@ -230,6 +232,8 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           trust_score: 85, // Trust Level B
           relevance_status: relevanceResult.relevance_status,
           relevance_score: relevanceResult.relevance_score,
+          positioning_fit_score: relevanceResult.positioning_fit_score,
+          why_it_matters_to_pranavi: relevanceResult.why_it_matters_to_pranavi,
           topic_family: relevanceResult.topic_family,
           relevance_reason: relevanceResult.relevance_reason,
           research_run_id: researchRunId
@@ -253,12 +257,16 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           fingerprint,
           relevance_status: relevanceResult.relevance_status,
           relevance_score: relevanceResult.relevance_score,
+          positioning_fit_score: relevanceResult.positioning_fit_score,
+          why_it_matters_to_pranavi: relevanceResult.why_it_matters_to_pranavi,
           topic_family: relevanceResult.topic_family,
           relevance_reason: relevanceResult.relevance_reason,
           relevance_checked_at: new Date().toISOString(),
           processed: !relevanceResult.eligible,
           research_run_id: researchRunId,
-          provenance: 'RSS_FEED'
+          provenance: 'RSS_FEED',
+          transport_used: 'RSS_HTTP',
+          fallback_used: false
         })
 
         if (!insertErr) {
@@ -272,15 +280,20 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
       errors.push(`RSS feed ${feed.name} failed: ${err.message}`)
     }
   }
-  sourceStatuses.rss = rssSuccessCount > 0 ? 'active' : 'failed'
+  sourceStatuses.rss = { status: rssSuccessCount > 0 ? 'active' : 'failed', transport: 'RSS_HTTP' }
 
   // ==================================================
   // 2. REDDIT SCRAPER WITH JINA FALLBACK
   // ==================================================
   let redditSuccessCount = 0
+  let redditFallbackTriggered = false
+
   for (const sub of SUBREDDITS) {
     try {
       let posts: any[] = []
+      let transportUsed: string = 'REDDIT_JSON'
+      let fallbackUsed: boolean = false
+
       const res = await fetch(`https://www.reddit.com/r/${sub}/new.json?limit=5`, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -298,6 +311,10 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
         }))
       } else {
         // Fallback to Jina Search for Reddit posts in this subreddit
+        redditFallbackTriggered = true
+        transportUsed = 'JINA_SEARCH'
+        fallbackUsed = true
+
         const jinaRedditUrl = `https://s.jina.ai/${encodeURIComponent(`site:reddit.com/r/${sub}`)}`
         const jinaRes = await fetch(jinaRedditUrl, { headers: jinaHeaders })
         if (jinaRes.ok) {
@@ -362,10 +379,12 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           platform: 'Reddit',
           query_used: `r/${sub}`,
           runtime: 'cloud',
-          agent_reach_used: true,
+          agent_reach_used: false, // Explicitly set false as native Agent Reach CLI was not called
           trust_score: 65, // Trust Level C
           relevance_status: relevanceResult.relevance_status,
           relevance_score: relevanceResult.relevance_score,
+          positioning_fit_score: relevanceResult.positioning_fit_score,
+          why_it_matters_to_pranavi: relevanceResult.why_it_matters_to_pranavi,
           topic_family: relevanceResult.topic_family,
           relevance_reason: relevanceResult.relevance_reason,
           research_run_id: researchRunId
@@ -389,12 +408,16 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           fingerprint,
           relevance_status: relevanceResult.relevance_status,
           relevance_score: relevanceResult.relevance_score,
+          positioning_fit_score: relevanceResult.positioning_fit_score,
+          why_it_matters_to_pranavi: relevanceResult.why_it_matters_to_pranavi,
           topic_family: relevanceResult.topic_family,
           relevance_reason: relevanceResult.relevance_reason,
           relevance_checked_at: new Date().toISOString(),
           processed: !relevanceResult.eligible,
           research_run_id: researchRunId,
-          provenance: 'REDDIT'
+          provenance: 'REDDIT',
+          transport_used: transportUsed,
+          fallback_used: fallbackUsed
         })
 
         if (!insertErr) {
@@ -408,7 +431,11 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
       errors.push(`Reddit r/${sub} scraper error: ${err.message}`)
     }
   }
-  sourceStatuses.reddit = redditSuccessCount > 0 ? 'active' : 'failed'
+  
+  sourceStatuses.reddit = {
+    status: redditSuccessCount > 0 ? 'active' : 'failed',
+    transport: redditFallbackTriggered ? 'JINA_FALLBACK' : 'REDDIT_JSON'
+  }
 
   // ==================================================
   // 3. LINKEDIN PUBLIC SEARCH via Jina Search API
@@ -465,10 +492,12 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           platform: 'LinkedIn Public',
           query_used: 'linkedin fashion tech contemporary design',
           runtime: 'cloud',
-          agent_reach_used: true,
+          agent_reach_used: false,
           trust_score: 75, // Trust Level B
           relevance_status: relevanceResult.relevance_status,
           relevance_score: relevanceResult.relevance_score,
+          positioning_fit_score: relevanceResult.positioning_fit_score,
+          why_it_matters_to_pranavi: relevanceResult.why_it_matters_to_pranavi,
           topic_family: relevanceResult.topic_family,
           relevance_reason: relevanceResult.relevance_reason,
           research_run_id: researchRunId
@@ -492,12 +521,16 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           fingerprint,
           relevance_status: relevanceResult.relevance_status,
           relevance_score: relevanceResult.relevance_score,
+          positioning_fit_score: relevanceResult.positioning_fit_score,
+          why_it_matters_to_pranavi: relevanceResult.why_it_matters_to_pranavi,
           topic_family: relevanceResult.topic_family,
           relevance_reason: relevanceResult.relevance_reason,
           relevance_checked_at: new Date().toISOString(),
           processed: !relevanceResult.eligible,
           research_run_id: researchRunId,
-          provenance: 'LINKEDIN_PUBLIC'
+          provenance: 'LINKEDIN_PUBLIC',
+          transport_used: 'JINA_SEARCH',
+          fallback_used: false
         })
 
         if (!insertErr) {
@@ -507,13 +540,13 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           deduplicatedCount++
         }
       }
-      sourceStatuses.linkedin_public = 'public_only'
+      sourceStatuses.linkedin_public = { status: 'public_only', transport: 'JINA_SEARCH' }
     } else {
-      sourceStatuses.linkedin_public = 'failed'
+      sourceStatuses.linkedin_public = { status: 'failed', transport: 'JINA_SEARCH' }
     }
   } catch (err: any) {
     errors.push(`LinkedIn Public Jina Search failed: ${err.message}`)
-    sourceStatuses.linkedin_public = 'failed'
+    sourceStatuses.linkedin_public = { status: 'failed', transport: 'JINA_SEARCH' }
   }
 
   // ==================================================
@@ -521,9 +554,9 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
   // ==================================================
   const xApiKey = process.env.X_API_KEY || process.env.TWITTER_BEARER_TOKEN
   if (xApiKey && !xApiKey.startsWith('your-')) {
-    sourceStatuses.twitter_x = 'active'
+    sourceStatuses.twitter_x = { status: 'active', transport: 'TWITTER_API' }
   } else {
-    sourceStatuses.twitter_x = 'auth_required'
+    sourceStatuses.twitter_x = { status: 'auth_required', transport: 'TWITTER_API' }
   }
 
   // Persist Source Statuses in Database settings for UI display

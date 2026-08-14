@@ -17,12 +17,31 @@ export default function SettingsPage() {
   const [lastVerified, setLastVerified] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const [researchSourcesStatus, setResearchSourcesStatus] = useState<Record<string, string>>({
-    rss: 'configured',
-    reddit: 'configured',
-    linkedin_public: 'configured',
-    twitter_x: 'auth_required'
+  const [researchSourcesStatus, setResearchSourcesStatus] = useState<Record<string, any>>({
+    rss: { status: 'configured', transport: 'RSS_HTTP' },
+    reddit: { status: 'configured', transport: 'REDDIT_JSON' },
+    linkedin_public: { status: 'configured', transport: 'JINA_SEARCH' },
+    twitter_x: { status: 'auth_required', transport: 'TWITTER_API' }
   })
+
+  const getSourceDisplay = (key: string) => {
+    const val = researchSourcesStatus[key]
+    if (!val) return 'CONFIGURED'
+    if (typeof val === 'string') return val.toUpperCase()
+    if (val.status && val.transport) {
+      return `${val.status.toUpperCase()} (${val.transport.replace('_', ' ')})`
+    }
+    return String(val).toUpperCase()
+  }
+
+  const getSourceColor = (key: string) => {
+    const val = researchSourcesStatus[key]
+    if (!val) return 'var(--text-secondary)'
+    const statusStr = (typeof val === 'string' ? val : val.status || '').toLowerCase()
+    if (statusStr.includes('active') || statusStr.includes('public_only')) return 'var(--success)'
+    if (statusStr.includes('auth_required')) return 'var(--danger)'
+    return 'var(--accent)'
+  }
 
   // Pipeline debug states
   const [pipelineLoading, setPipelineLoading] = useState(false)
@@ -294,32 +313,34 @@ export default function SettingsPage() {
               </div>
             </div>
 
+
+
             {/* Research Sources Status */}
             <div className="card" style={{ border: '1px solid var(--border)' }}>
               <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '1rem' }}>Advanced Research Sources</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
                 <div className="stat-card" style={{ padding: '0.75rem' }}>
                   <p className="stat-label">RSS Feeds</p>
-                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--success)', marginTop: '0.25rem' }}>
-                    {String(researchSourcesStatus.rss || 'configured').toUpperCase()}
+                  <p style={{ fontSize: '0.72rem', fontWeight: 700, color: getSourceColor('rss'), marginTop: '0.25rem' }}>
+                    {getSourceDisplay('rss')}
                   </p>
                 </div>
                 <div className="stat-card" style={{ padding: '0.75rem' }}>
                   <p className="stat-label">Reddit</p>
-                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: researchSourcesStatus.reddit === 'active' ? 'var(--success)' : 'var(--accent)', marginTop: '0.25rem' }}>
-                    {String(researchSourcesStatus.reddit || 'configured').toUpperCase()}
+                  <p style={{ fontSize: '0.72rem', fontWeight: 700, color: getSourceColor('reddit'), marginTop: '0.25rem' }}>
+                    {getSourceDisplay('reddit')}
                   </p>
                 </div>
                 <div className="stat-card" style={{ padding: '0.75rem' }}>
                   <p className="stat-label">LinkedIn Public</p>
-                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--success)', marginTop: '0.25rem' }}>
-                    {String(researchSourcesStatus.linkedin_public || 'configured').toUpperCase()}
+                  <p style={{ fontSize: '0.72rem', fontWeight: 700, color: getSourceColor('linkedin_public'), marginTop: '0.25rem' }}>
+                    {getSourceDisplay('linkedin_public')}
                   </p>
                 </div>
                 <div className="stat-card" style={{ padding: '0.75rem' }}>
                   <p className="stat-label">Twitter / X</p>
-                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--danger)', marginTop: '0.25rem' }}>
-                    {String(researchSourcesStatus.twitter_x || 'auth_required').toUpperCase()}
+                  <p style={{ fontSize: '0.72rem', fontWeight: 700, color: getSourceColor('twitter_x'), marginTop: '0.25rem' }}>
+                    {getSourceDisplay('twitter_x')}
                   </p>
                 </div>
               </div>
