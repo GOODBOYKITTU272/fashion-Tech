@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
+import { authenticatedFetch } from '@/lib/authenticated-fetch'
 
 interface ControlRoomStatusData {
   automation: {
@@ -43,7 +44,7 @@ export default function TodayPage() {
   useEffect(() => {
     async function loadStatus() {
       try {
-        const res = await fetch('/api/control-room/status')
+        const res = await authenticatedFetch('/api/control-room/status')
         if (res.ok) {
           const json = await res.json()
           setData(json)
@@ -61,7 +62,7 @@ export default function TodayPage() {
     setDryRunLoading(true)
     setDryRunResult(null)
     try {
-      const res = await fetch('/api/publisher/dry-run', {
+      const res = await authenticatedFetch('/api/publisher/dry-run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

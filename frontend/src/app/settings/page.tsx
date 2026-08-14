@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { authenticatedFetch } from '@/lib/authenticated-fetch'
 
 export default function SettingsPage() {
   const [autoMode, setAutoMode] = useState(true)
@@ -36,7 +37,7 @@ export default function SettingsPage() {
 
     async function fetchStatus() {
       try {
-        const res = await fetch('/api/control-room/status')
+        const res = await authenticatedFetch('/api/control-room/status')
         if (res.ok) {
           const data = await res.json()
           const linkedin = data.linkedin
@@ -71,7 +72,7 @@ export default function SettingsPage() {
   const updateAutomationSettings = async (newAutoMode: boolean, newPause: boolean) => {
     setSavingSettings(true)
     try {
-      const res = await fetch('/api/automation/settings', {
+      const res = await authenticatedFetch('/api/automation/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
