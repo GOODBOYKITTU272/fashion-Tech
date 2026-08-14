@@ -1,8 +1,8 @@
-# App Flow — Autonomous LinkedIn Content Engine V2
+# App Flow — Autonomous LinkedIn Content Engine V2.1
 
 ---
 
-## Autonomous Daily Flow (NO Manual Work Required)
+## Autonomous Daily Execution Flow (NO Daily Manual Work)
 
 ```
 [Night / 2:00 AM]
@@ -12,7 +12,9 @@
     n8n W2 (Deduplicate & Score) → AI Provider → Supabase topic_scores
 
 [4:00 AM]
-    n8n W3 (Draft Generator) → AI Provider → Copy, Hooks & Carousel Outline → Supabase drafts
+    n8n W3 (Draft Generator)
+    ├── Generates Copy, Hooks & 6–8 slide PDF Carousel Brief
+    └── Renders 6–8 page PDF document asset → Supabase drafts
 
 [5:00 AM]
     n8n W4 (Automated Quality Gate)
@@ -22,24 +24,31 @@
 
 [Scheduled Slot Time]
     n8n W6 (LinkedIn Publisher)
-    ├── Check: AUTO MODE == ON && PAUSE_ALL == FALSE && Token Valid
-    ├── Call Official LinkedIn API (w_member_social)
+    ├── State Machine Check: integration_status == 'CONNECTED'
+    ├── Guard Check: AUTO MODE == ON && PAUSE_ALL == FALSE && Scope 'w_member_social' Present
+    ├── Upload PDF/Media asset to LinkedIn → Publish Document Post via Official API
     ├── Save LinkedIn Post URN + Permalink to Supabase
     └── Update status to 'published' (or 'failed' on error)
 
 [Every Evening]
-    n8n W7 (Analytics Collector) → LinkedIn Official Analytics API → Supabase post_metrics
+    n8n W7 (Analytics Collector)
+    ├── State Machine Check: Scope 'r_member_postAnalytics' Granted
+    └── Official LinkedIn Analytics API → Supabase post_metrics (No estimation; missing = NULL)
 ```
 
 ---
 
-## Human Exception Flow (Optional / Manual Overrides Only)
+## State Machine & Exception Handling Flow
 
 ```
-Pranavi opens Control Room (Optional)
-├── View Auto Mode Status [ON / OFF]
-├── View LinkedIn OAuth Connection & Expiry Status
-├── Review any items flagged 'NEEDS REVIEW' or 'NEEDS INPUT'
-├── Add new personal experiences to Brand Memory (if desired)
-└── Manually override schedule or pause publishing if needed
+[Integration State Monitoring (W9)]
+    ├── IF expires_at < 7 days → Set status = 'REAUTH_REQUIRED' → Alert in Settings
+    ├── IF API returns 401 → Set status = 'REAUTH_REQUIRED' → Pause W6 Publisher
+    ├── IF Scopes Missing → Set status = 'PERMISSION_MISSING' → Display Scopes Needed
+    └── IF Dev App Unapproved → Set status = 'WAITING_FOR_API_ACCESS'
+
+[Human Overrides (Optional / Exception-Only)]
+    ├── Settings Screen → View Connection Metadata (No raw tokens) & Reauthorize
+    ├── Review items marked 'NEEDS REVIEW' or 'NEEDS INPUT'
+    └── Manage stored Personal Experience Memory
 ```

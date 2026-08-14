@@ -1,9 +1,9 @@
 # TRD — Technical Requirements Document
-**Version:** 2.0 (Autonomous LinkedIn Official API Architecture)
+**Version:** 2.1 (Autonomous LinkedIn Official API Architecture — Refined)
 
 ---
 
-## 1. System Architecture
+## 1. System Architecture & Component Flow
 
 ```
 Agent Reach (research connector)
@@ -12,63 +12,98 @@ n8n Community Edition (orchestration W1–W9)
         ↓
 AI Provider Abstraction (OpenAI / Gemini / Ollama)
         ↓
-Supabase PostgreSQL (database & state management)
+Supabase PostgreSQL (state management & audit logs)
         ↓
-LinkedIn Official API (Publishing: w_member_social | Analytics: r_member_postAnalytics)
+PDF Document Generator (for 6–8 slide document/PDF carousel posts)
         ↓
-Next.js Control Room (Auto Mode Monitoring, OAuth Settings, Exception Override)
+LinkedIn Official API (Posts API: w_member_social | Analytics API: r_member_postAnalytics)
+        ↓
+Next.js Control Room (Auto Mode Monitoring, OAuth Manager, State Machine UI)
 ```
 
 ---
 
-## 2. LinkedIn OAuth & Security Architecture
+## 2. OAuth Token Lifecycle & Security Architecture
 
-| Requirement | Implementation |
-|-------------|----------------|
-| Authentication | Official OAuth 2.0 Authorization Code Flow |
-| Credentials | `LINKEDIN_CLIENT_ID` (Server-side/Env) and `LINKEDIN_CLIENT_SECRET` (Server-side ONLY) |
-| Scopes | `w_member_social`, `r_member_postAnalytics`, `r_member_profileAnalytics` (or approved equivalents) |
-| Token Storage | Encrypted in `linkedin_connections` table in Supabase |
-| Expiry Tracking | Auto-refresh tracking & re-auth alerts when token expires (< 7 days remaining) |
-| Callback Route | `/api/auth/linkedin/callback` (Next.js server-side handler) |
-| Frontend Display | Settings page shows connection state: Connected / Disconnected, Granted Scopes, Expiry, Reconnect button |
+### Token Lifecycle
+LinkedIn's 3-legged OAuth 2.0 flow issues access tokens that expire after a set duration (typically 60 days). The system does NOT assume an automatic background `refresh_token` exists unless explicitly provided by the approved tier.
+
+Token Lifecycle fields:
+- `access_token_ciphertext` (AES-256 encrypted string)
+- `expires_at` (TIMESTAMPTZ)
+- `granted_scopes` (TEXT[])
+- `last_verified_at` (TIMESTAMPTZ)
+- `auth_status` (`valid` | `expiring_soon` | `expired` | `revoked`)
+- `reauthorization_required` (BOOLEAN)
+
+When `expires_at` is < 7 days away or an API call returns 401 Unauthorized:
+- `auth_status` is updated to `expiring_soon` or `expired`.
+- `reauthorization_required` is set to `TRUE`.
+- `integration_status` transitions to `REAUTH_REQUIRED`.
+- Automated publishing (W6) pauses safely.
+- Settings UI displays a prominent **"LinkedIn Reauthorization Required"** button.
+
+### Server-Side Secure Token Storage
+1. **Server-Only Encryption**: Encryption and decryption occur strictly server-side using a symmetric key (`LINKEDIN_TOKEN_ENCRYPTION_KEY`) stored ONLY in server environment variables.
+2. **RLS & Security Boundary**: Supabase Row Level Security (RLS) policies prohibit browser clients from selecting `access_token_ciphertext`.
+3. **Frontend Exposure**: The browser API `/api/linkedin/status` ONLY exposes safe metadata:
+   - `connected` (boolean)
+   - `linkedin_member_urn` (string)
+   - `granted_scopes` (array)
+   - `expires_at` (timestamp)
+   - `last_verified_at` (timestamp)
+   - `integration_status` (enum)
 
 ---
 
-## 3. Database Schema Extensions
+## 3. Integration State Machine
 
-### New Tables
-1. **`linkedin_connections`**: Stores OAuth tokens, refresh tokens, user URN, granted scopes, expires_at.
-2. **`automation_settings`**: Global `auto_mode_enabled` (boolean), `pause_all_publishing` (boolean), `min_confidence_score` (int).
-3. **`publishing_attempts`**: Audit log of API requests, responses, HTTP status, retry counts, failure reasons.
-4. **`automation_events`**: Event audit trail (e.g. `FAILSAFE_TRIGGERED`, `TOKEN_EXPIRED`, `NEEDS_INPUT`).
+The system enforces strict state-based gating before attempting API calls:
 
-### Extended Tables
-- **`published_posts`**: Stores `linkedin_post_urn`, `linkedin_permalink`, `publication_status` (`scheduled`, `publishing`, `published`, `failed`, `needs_review`).
+```
+[NOT_CONFIGURED]
+       ↓ (Client ID & Secret set in .env)
+[WAITING_FOR_API_ACCESS] (Displayed until official developer portal scopes granted)
+       ↓ (Scopes approved)
+[READY_FOR_OAUTH]
+       ↓ (User completes OAuth 3-legged flow)
+[CONNECTED] ──(Token expires / 401)──> [REAUTH_REQUIRED] ──(Re-auth completed)──> [CONNECTED]
+       │
+       ├──(Missing scopes)────────────> [PERMISSION_MISSING]
+       ├──(User toggle)───────────────> [PAUSED]
+       └──(Fatal API error)───────────> [ERROR]
+```
+
+### Automation Execution Guard
+n8n W6 (Publisher) executes ONLY if ALL of the following are true:
+- `integration_status === 'CONNECTED'`
+- `granted_scopes` includes `w_member_social`
+- `auto_mode_enabled === TRUE`
+- `pause_all_publishing === FALSE`
+- `quality_gate_status === 'PASSED'`
 
 ---
 
-## 4. n8n Workflows (W1–W9 Map)
+## 4. Document / PDF Carousel Pipeline
 
-| Workflow ID | Name | Trigger | Description |
-|-------------|------|---------|-------------|
+Since native organic carousels are NOT supported by the LinkedIn Posts API:
+1. W3 generates 6–8 slide text & layout JSON structures.
+2. Server-side generator renders the slides into a 6–8 page PDF document.
+3. W6 uploads the PDF as a LinkedIn `document` asset via the Assets/Media API.
+4. W6 publishes the post attaching the document URN via the Posts API.
+
+---
+
+## 5. n8n Workflows Map (W1–W9)
+
+| ID | Name | Trigger | Purpose |
+|----|------|---------|---------|
 | **W1** | Daily Research | Daily Cron | Scrapes signals via Agent Reach → writes `research_signals` |
 | **W2** | Deduplicate & Score | Post-W1 | Clusters signals, calls AI scoring → writes `topic_scores` |
-| **W3** | Draft Generator | Auto / Webhook | Generates post copy, hooks, carousel outline → saves to `drafts` |
-| **W4** | Automated Quality Gate | Post-W3 | Runs fact-check, voice check, duplicate check, personal input check |
-| **W5** | Weekly Scheduler | Sunday Cron | Assigns top quality-passed drafts to 4 weekly calendar slots |
-| **W6** | LinkedIn Publisher | Schedule Cron | Checks Auto Mode & Quality Gate → publishes via Official API → logs URN |
-| **W7** | LinkedIn Analytics Collector | Daily Cron | Calls Official Analytics API → writes metrics to `post_metrics` |
+| **W3** | Draft Generator | Auto / Webhook | Generates post copy, hooks, PDF carousel brief → writes `drafts` |
+| **W4** | Automated Quality Gate | Post-W3 | Runs fact-check, voice check, duplicate check, personal context check |
+| **W5** | Weekly Scheduler | Sunday Cron | Assigns quality-passed drafts to 4 weekly calendar slots |
+| **W6** | LinkedIn Publisher | Slot Cron | Verifies state machine & guard → uploads PDF/media → publishes via Official API |
+| **W7** | LinkedIn Analytics Collector | Daily Cron | Calls `r_member_postAnalytics` → writes `post_metrics` |
 | **W8** | Weekly Review | Sunday Night | Analyzes performance → updates `learning_memory` and recommendations |
-| **W9** | Auth Health Check | Daily Cron | Verifies LinkedIn OAuth token expiry → alerts if re-auth is required |
-
----
-
-## 5. Safety & Exception Handling
-
-Publication is automatically blocked and flagged as `NEEDS REVIEW` if:
-1. `auto_mode_enabled` is set to `FALSE` or `pause_all_publishing` is `TRUE`.
-2. Fact-check status is `flagged` or confidence score is below threshold.
-3. Content requires new personal experience not found in stored `learning_memory` / Personal Memory.
-4. LinkedIn OAuth token is expired or unauthorized.
-5. Official LinkedIn API returns 4xx / 5xx permanent error.
+| **W9** | Auth Health Check | Daily Cron | Checks `expires_at` → updates `integration_status` to `REAUTH_REQUIRED` if < 7d |
