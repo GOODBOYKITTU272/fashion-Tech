@@ -28,6 +28,7 @@ export default function EditorPage() {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [carouselPdfUrl, setCarouselPdfUrl] = useState<string | null>(null)
   const [carouselCoverUrl, setCarouselCoverUrl] = useState<string | null>(null)
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0)
   
   // Scheduling fields
   const [plannedDate, setPlannedDate] = useState('')
@@ -205,6 +206,47 @@ export default function EditorPage() {
     }
   }
 
+  const getSlides = () => {
+    const rawParagraphs = caption ? caption.split('\n\n').filter(p => p.trim().length > 10) : []
+    const slides = [
+      {
+        type: 'CoverSlide',
+        heading: title || 'Untitled Concept',
+        body: caption ? caption.substring(0, 160) + '...' : 'Slide hook goes here.'
+      },
+      {
+        type: 'SectionSlide',
+        heading: 'The Context',
+        body: rawParagraphs[0] || 'Understanding the intersection of design and craft parameter systems.'
+      }
+    ]
+
+    const insightTypes = ['InsightSlide', 'ComparisonSlide', 'CraftDetailSlide', 'FrameworkSlide']
+    const remaining = rawParagraphs.slice(1, 5)
+
+    remaining.forEach((para, idx) => {
+      slides.push({
+        type: insightTypes[idx % insightTypes.length] as any,
+        heading: para.substring(0, 30).trim() + '...',
+        body: para
+      })
+    })
+
+    slides.push({
+      type: 'QuoteSlide',
+      heading: 'Philosophy',
+      body: rawParagraphs[rawParagraphs.length - 1] || 'Design process iteration quote.'
+    })
+
+    slides.push({
+      type: 'ClosingSlide',
+      heading: 'Reflection & CTA',
+      body: 'Follow Pranavi Yadav for Code x Craft x Contemporary Design insights.'
+    })
+
+    return slides
+  }
+
   if (loading) {
     return (
       <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
@@ -296,20 +338,130 @@ export default function EditorPage() {
           )}
 
           {activeTab === 'visual' && (
-            <div className="card" style={{ border: '1px solid var(--border)', textAlign: 'center' }}>
-              <p className="section-label" style={{ fontSize: '0.7rem' }}>Visual Asset Preview</p>
-              {carouselCoverUrl || imageUrl ? (
-                <div style={{ maxWidth: '360px', margin: '1rem auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-                  <img src={carouselCoverUrl || imageUrl || ''} alt="Draft Preview" style={{ width: '100%', objectFit: 'contain' }} />
-                </div>
-              ) : (
-                <p style={{ color: 'var(--text-secondary)', padding: '3rem 0' }}>No cover SVG or media assets generated for this post format yet.</p>
-              )}
-              {carouselPdfUrl && (
-                <div style={{ marginTop: '1rem' }}>
-                  <a href={carouselPdfUrl} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
-                    📂 Download Generated PDF Document
+            <div className="card" style={{ border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <p className="section-label" style={{ fontSize: '0.7rem', margin: 0 }}>Interactive Carousel Preview</p>
+                {carouselPdfUrl && (
+                  <a href={carouselPdfUrl} target="_blank" rel="noreferrer" className="btn btn-secondary btn-xs" style={{ fontSize: '0.7rem', textDecoration: 'none' }}>
+                    📂 Download PDF
                   </a>
+                )}
+              </div>
+
+              {format === 'pdf_carousel' || format === 'carousel' ? (() => {
+                const slides = getSlides()
+                const currentSlide = slides[activeSlideIndex] || slides[0]
+                const totalSlides = slides.length
+
+                const handlePrev = () => setActiveSlideIndex(prev => Math.max(0, prev - 1))
+                const handleNext = () => setActiveSlideIndex(prev => Math.min(totalSlides - 1, prev + 1))
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center' }}>
+                    {/* The 4:5 Slide Viewport */}
+                    <div style={{
+                      width: '320px',
+                      height: '400px',
+                      background: '#FAF6F0',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '24px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      position: 'relative',
+                      boxShadow: '0 4px 12px rgba(28, 27, 25, 0.03)',
+                      textAlign: 'left'
+                    }}>
+                      {/* Top Header */}
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '0.5px solid #e5e5e0', paddingBottom: '6px', marginBottom: '16px' }}>
+                          <span style={{ fontSize: '7px', letterSpacing: '1.2px', color: '#696560', fontWeight: 600 }}>CODE × CRAFT</span>
+                          <span style={{ fontSize: '7px', color: '#696560', fontWeight: 700 }}>0{activeSlideIndex + 1}</span>
+                        </div>
+
+                        {/* Title & Body Layout Grid */}
+                        <div style={{ display: 'flex', gap: '12px', height: '260px' }}>
+                          {/* Left Column Content */}
+                          <div style={{ flex: currentSlide.type === 'SectionSlide' || currentSlide.type === 'QuoteSlide' ? '1' : '0.55', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <h3 style={{
+                              fontFamily: 'var(--font-serif)',
+                              fontSize: currentSlide.type === 'CoverSlide' ? '19px' : '15px',
+                              lineHeight: '1.3',
+                              color: currentSlide.type === 'QuoteSlide' ? '#8C7B6C' : '#1C1B19',
+                              fontWeight: 400,
+                              margin: 0
+                            }}>
+                              {currentSlide.heading}
+                            </h3>
+                            <div style={{ width: '30px', height: '1px', background: '#8C7B6C', margin: '2px 0' }} />
+                            <p style={{
+                              fontFamily: 'var(--font-sans)',
+                              fontSize: '9px',
+                              lineHeight: '1.55',
+                              color: '#696560',
+                              margin: 0,
+                              wordBreak: 'break-word'
+                            }}>
+                              {currentSlide.body}
+                            </p>
+                          </div>
+
+                          {/* Right Column Sketch SVGs */}
+                          {currentSlide.type !== 'SectionSlide' && currentSlide.type !== 'QuoteSlide' && (
+                            <div style={{ flex: '0.45', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.85 }}>
+                              {currentSlide.type === 'CoverSlide' || currentSlide.type === 'FrameworkSlide' ? (
+                                <svg viewBox="0 0 100 200" style={{ width: '100%', height: '160px', stroke: '#1C1B19', fill: 'none', strokeWidth: 1.2 }}>
+                                  <path d="M 40 20 L 60 20 L 63 35 L 75 50 L 70 85 Q 63 110 61 140 Q 66 160 70 185 L 30 185 Q 34 160 39 140 Q 37 110 30 85 L 25 50 L 37 35 Z" />
+                                  <line x1="50" y1="0" x2="50" y2="200" stroke="#e5e5e0" strokeWidth="0.8" />
+                                </svg>
+                              ) : currentSlide.type === 'CraftDetailSlide' ? (
+                                <svg viewBox="0 0 100 200" style={{ width: '100%', height: '160px', stroke: '#1C1B19', fill: 'none', strokeWidth: 1.2 }}>
+                                  <path d="M 50 10 L 80 20 L 85 60 Q 75 80 80 100 L 65 170 L 35 170 L 35 20 Z" />
+                                  <path d="M 46 6 L 85 14 L 90 60 Q 80 84 84 104 L 69 176 L 31 176 L 31 20 Z" stroke="#8C7B6C" strokeDasharray="3,2" strokeWidth="0.8" />
+                                </svg>
+                              ) : (
+                                <svg viewBox="0 0 100 200" style={{ width: '100%', height: '160px', stroke: '#1C1B19', fill: 'none', strokeWidth: 1.2 }}>
+                                  <path d="M 35 25 Q 55 60 45 100 Q 65 125 50 180" />
+                                  <path d="M 60 30 Q 40 70 55 90 Q 40 120 45 180" />
+                                  <path d="M 25 40 Q 50 65 60 85 Q 42 120 40 180" />
+                                </svg>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bottom Footer */}
+                      <div style={{ borderTop: '0.5px solid #e5e5e0', paddingTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '6.5px', color: '#7c7974' }}>Pranavi | Fashion Design Journey</span>
+                        <span style={{ fontSize: '6.5px', color: '#7c7974', fontWeight: 600 }}>{currentSlide.type}</span>
+                      </div>
+                    </div>
+
+                    {/* Prev/Next controls */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.25rem' }}>
+                      <button className="btn btn-secondary btn-sm" onClick={handlePrev} disabled={activeSlideIndex === 0}>
+                        ◀ Prev
+                      </button>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        Slide {activeSlideIndex + 1} of {totalSlides}
+                      </span>
+                      <button className="btn btn-secondary btn-sm" onClick={handleNext} disabled={activeSlideIndex === totalSlides - 1}>
+                        Next ▶
+                      </button>
+                    </div>
+                  </div>
+                )
+              })() : (
+                <div>
+                  {carouselCoverUrl || imageUrl ? (
+                    <div style={{ maxWidth: '320px', margin: '1rem auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                      <img src={carouselCoverUrl || imageUrl || ''} alt="Draft Preview" style={{ width: '100%', objectFit: 'contain' }} />
+                    </div>
+                  ) : (
+                    <p style={{ color: 'var(--text-secondary)', padding: '2rem 0' }}>No media assets generated for this post format yet.</p>
+                  )}
                 </div>
               )}
             </div>
