@@ -14,11 +14,11 @@ export default function SettingsPage() {
   const [lastVerified, setLastVerified] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  // Real System Health State
+  // Honest System Health State — reflects verified status vs configured status
   const [health, setHealth] = useState({
     supabase: 'HEALTHY',
-    openai: 'CONFIGURED',
-    n8n: 'CONFIGURED',
+    openai: 'CONFIGURED — NOT VERIFIED',
+    n8n: 'CONFIGURED — NOT VERIFIED',
     linkedin: 'WAITING_FOR_API_ACCESS',
     autoMode: 'ON',
     publishing: 'BLOCKED'
@@ -36,26 +36,28 @@ export default function SettingsPage() {
 
     async function fetchStatus() {
       try {
-        const res = await fetch('/api/linkedin/status')
-        const data = await res.json()
-        if (data) {
-          setIntegrationStatus(data.integration_status || 'WAITING_FOR_API_ACCESS')
-          setAutoMode(data.auto_mode_enabled ?? true)
-          setPausePublishing(data.pause_all_publishing ?? false)
-          setMinConfidence(data.min_confidence_score ?? 70)
-          setMemberUrn(data.linkedin_member_urn || null)
-          setExpiresAt(data.expires_at || null)
-          setLastVerified(data.last_verified_at || null)
-          setScopes(Array.isArray(data.granted_scopes) ? data.granted_scopes : [])
+        const res = await fetch('/api/control-room/status')
+        if (res.ok) {
+          const data = await res.json()
+          const linkedin = data.linkedin
+          const automation = data.automation
 
-          // Derive Real System Health
+          setIntegrationStatus(linkedin?.integration_status || 'WAITING_FOR_API_ACCESS')
+          setAutoMode(automation?.auto_mode_enabled ?? true)
+          setPausePublishing(automation?.pause_all_publishing ?? false)
+          setMinConfidence(automation?.min_confidence_score ?? 70)
+          setMemberUrn(linkedin?.linkedin_member_urn || null)
+          setExpiresAt(linkedin?.expires_at || null)
+          setLastVerified(linkedin?.last_verified_at || null)
+          setScopes(Array.isArray(linkedin?.granted_scopes) ? linkedin.granted_scopes : [])
+
           setHealth({
             supabase: 'HEALTHY',
-            openai: process.env.NEXT_PUBLIC_AI_PROVIDER || 'CONFIGURED',
-            n8n: 'CONFIGURED',
-            linkedin: data.integration_status || 'WAITING_FOR_API_ACCESS',
-            autoMode: data.auto_mode_enabled ? 'ON' : 'OFF',
-            publishing: data.pause_all_publishing ? 'PAUSED' : (data.integration_status === 'CONNECTED' ? 'ACTIVE' : 'BLOCKED')
+            openai: 'CONFIGURED — NOT VERIFIED',
+            n8n: 'CONFIGURED — NOT VERIFIED',
+            linkedin: linkedin?.integration_status || 'WAITING_FOR_API_ACCESS',
+            autoMode: automation?.auto_mode_enabled ? 'ON' : 'OFF',
+            publishing: automation?.pause_all_publishing ? 'PAUSED' : (linkedin?.integration_status === 'CONNECTED' ? 'ACTIVE' : 'BLOCKED')
           })
         }
       } catch (err) {
@@ -118,43 +120,43 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* SYSTEM HEALTH PANEL */}
+      {/* SYSTEM HEALTH PANEL WITH UNVERIFIED SERVICE METRICS */}
       <div className="card card-pad" style={{ marginBottom: '1.5rem' }}>
         <h2 className="section-title">🏥 System Health Panel</h2>
         <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
           <div className="stat-card" style={{ padding: '0.75rem' }}>
             <p className="stat-label">Supabase DB</p>
-            <p style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--green)', marginTop: '0.25rem' }}>
+            <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--green)', marginTop: '0.25rem' }}>
               🟢 {health.supabase}
             </p>
           </div>
           <div className="stat-card" style={{ padding: '0.75rem' }}>
             <p className="stat-label">OpenAI Engine</p>
-            <p style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--primary)', marginTop: '0.25rem' }}>
+            <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--primary)', marginTop: '0.25rem' }}>
               ⚡ {health.openai}
             </p>
           </div>
           <div className="stat-card" style={{ padding: '0.75rem' }}>
             <p className="stat-label">n8n Engine</p>
-            <p style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--accent)', marginTop: '0.25rem' }}>
+            <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent)', marginTop: '0.25rem' }}>
               ⚙️ {health.n8n}
             </p>
           </div>
           <div className="stat-card" style={{ padding: '0.75rem' }}>
             <p className="stat-label">LinkedIn API</p>
-            <p style={{ fontSize: '0.85rem', fontWeight: 700, color: health.linkedin === 'CONNECTED' ? 'var(--green)' : 'var(--accent)', marginTop: '0.25rem' }}>
+            <p style={{ fontSize: '0.82rem', fontWeight: 700, color: health.linkedin === 'CONNECTED' ? 'var(--green)' : 'var(--accent)', marginTop: '0.25rem' }}>
               🛡️ {health.linkedin}
             </p>
           </div>
           <div className="stat-card" style={{ padding: '0.75rem' }}>
             <p className="stat-label">Auto Mode</p>
-            <p style={{ fontSize: '0.9rem', fontWeight: 700, color: health.autoMode === 'ON' ? 'var(--green)' : 'var(--text-3)', marginTop: '0.25rem' }}>
+            <p style={{ fontSize: '0.85rem', fontWeight: 700, color: health.autoMode === 'ON' ? 'var(--green)' : 'var(--text-3)', marginTop: '0.25rem' }}>
               {health.autoMode === 'ON' ? '⚡ ON' : '⏸️ OFF'}
             </p>
           </div>
           <div className="stat-card" style={{ padding: '0.75rem' }}>
             <p className="stat-label">Publishing</p>
-            <p style={{ fontSize: '0.85rem', fontWeight: 700, color: health.publishing === 'ACTIVE' ? 'var(--green)' : 'var(--red)', marginTop: '0.25rem' }}>
+            <p style={{ fontSize: '0.82rem', fontWeight: 700, color: health.publishing === 'ACTIVE' ? 'var(--green)' : 'var(--red)', marginTop: '0.25rem' }}>
               {health.publishing === 'ACTIVE' ? '✅ ACTIVE' : health.publishing === 'PAUSED' ? '⛔ PAUSED' : '🔒 BLOCKED'}
             </p>
           </div>

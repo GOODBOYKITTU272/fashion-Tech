@@ -13,21 +13,48 @@ export interface LinkedInIntegrationState {
   can_read_profile_analytics: boolean
 }
 
-export async function getLinkedInIntegrationState(userId?: string): Promise<LinkedInIntegrationState> {
+export async function getLinkedInIntegrationState(userId: string): Promise<LinkedInIntegrationState> {
+  const hasClientCredentials = !!(process.env.LINKEDIN_CLIENT_ID && process.env.LINKEDIN_CLIENT_SECRET)
+
+  if (!userId) {
+    return {
+      integration_status: 'ERROR',
+      auth_status: 'expired',
+      granted_scopes: [],
+      expires_at: null,
+      last_verified_at: null,
+      reauthorization_required: true,
+      linkedin_member_urn: null,
+      can_publish: false,
+      can_read_post_analytics: false,
+      can_read_profile_analytics: false
+    }
+  }
+
   try {
-    let query = supabase
+    const { data, error } = await supabase
       .from('linkedin_connections')
       .select('integration_status, auth_status, granted_scopes, expires_at, last_verified_at, reauthorization_required, linkedin_member_urn')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
 
-    if (userId) {
-      query = query.eq('user_id', userId)
+    if (error) {
+      return {
+        integration_status: 'ERROR',
+        auth_status: 'expired',
+        granted_scopes: [],
+        expires_at: null,
+        last_verified_at: null,
+        reauthorization_required: true,
+        linkedin_member_urn: null,
+        can_publish: false,
+        can_read_post_analytics: false,
+        can_read_profile_analytics: false
+      }
     }
 
-    const { data, error } = await query.order('updated_at', { ascending: false }).limit(1)
-
-    const hasClientCredentials = !!(process.env.LINKEDIN_CLIENT_ID && process.env.LINKEDIN_CLIENT_SECRET)
-
-    if (error || !data || data.length === 0) {
+    if (!data || data.length === 0) {
       const status = hasClientCredentials ? 'READY_FOR_OAUTH' : 'WAITING_FOR_API_ACCESS'
       return {
         integration_status: status,
@@ -65,14 +92,14 @@ export async function getLinkedInIntegrationState(userId?: string): Promise<Link
       can_read_profile_analytics: canReadProfileAnalytics
     }
   } catch (err) {
-    console.error('Failed to query linkedin_connections:', err)
+    console.error('Failed to query linkedin_connections (failing safe):', err)
     return {
-      integration_status: 'WAITING_FOR_API_ACCESS',
-      auth_status: 'valid',
+      integration_status: 'ERROR',
+      auth_status: 'expired',
       granted_scopes: [],
       expires_at: null,
       last_verified_at: null,
-      reauthorization_required: false,
+      reauthorization_required: true,
       linkedin_member_urn: null,
       can_publish: false,
       can_read_post_analytics: false,

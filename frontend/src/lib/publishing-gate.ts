@@ -3,11 +3,11 @@ import { getLinkedInIntegrationState } from './linkedin-control'
 import { logAutomationEvent } from './automation-events'
 
 export interface PublishingEligibilityParams {
-  userId?: string
-  contentStatus?: string // 'approved', 'scheduled', 'draft', etc.
-  qualityGateStatus?: string // 'passed', 'failed', 'needs_input', 'pending'
+  userId: string
+  contentStatus?: string
+  qualityGateStatus?: string
   confidenceScore?: number
-  personalContextStatus?: string // 'passed', 'needs_input'
+  personalContextStatus?: string
 }
 
 export interface PublishingEligibilityResult {
@@ -27,8 +27,31 @@ export async function canPublishScheduledPost(params: PublishingEligibilityParam
 
   const reasons: string[] = []
 
+  if (!userId) {
+    return {
+      allowed: false,
+      reason_code: 'AUTOMATION_STATE_UNAVAILABLE',
+      reasons: ['No authenticated user ID provided for publishing eligibility gate evaluation.']
+    }
+  }
+
   // 1. Fetch Automation Control Plane State
   const autoState = await getAutomationState(userId)
+
+  if (!autoState.state_valid) {
+    reasons.push('Automation control state is unverified or unavailable in database.')
+    await logAutomationEvent({
+      userId,
+      eventType: 'FAILSAFE_TRIGGERED',
+      severity: 'critical',
+      message: 'Publishing eligibility evaluation denied due to unverified automation control state.'
+    })
+    return {
+      allowed: false,
+      reason_code: 'AUTOMATION_STATE_UNAVAILABLE',
+      reasons
+    }
+  }
 
   if (autoState.pause_all_publishing) {
     reasons.push('Publishing is explicitly paused via Emergency Failsafe toggle.')

@@ -2,41 +2,63 @@
 
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
-import { getAutomationState, type AutomationState } from '@/lib/automation-control'
-import { getLinkedInIntegrationState, type LinkedInIntegrationState } from '@/lib/linkedin-control'
-import { canPublishScheduledPost, type PublishingEligibilityResult } from '@/lib/publishing-gate'
+
+interface ControlRoomStatusData {
+  automation: {
+    auto_mode_enabled: boolean
+    pause_all_publishing: boolean
+    min_confidence_score: number
+    state_valid: boolean
+  }
+  linkedin: {
+    integration_status: string
+    auth_status: string
+    granted_scopes: string[]
+    can_publish: boolean
+  }
+  next_post: {
+    id: string
+    title: string
+    pillar: string
+    format: string
+    planned_date: string
+    planned_time: string | null
+    status: string
+    quality_gate_status: string
+    confidence_score: number | null
+  } | null
+  publishing_gate: {
+    allowed: boolean
+    reason_code: string
+    reasons: string[]
+  }
+}
 
 export default function TodayPage() {
-  const [autoState, setAutoState] = useState<AutomationState | null>(null)
-  const [linkedinState, setLinkedinState] = useState<LinkedInIntegrationState | null>(null)
-  const [gateResult, setGateResult] = useState<PublishingEligibilityResult | null>(null)
+  const [data, setData] = useState<ControlRoomStatusData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    async function loadControlRoomData() {
+    async function loadStatus() {
       try {
-        const [auto, linkedin] = await Promise.all([
-          getAutomationState(),
-          getLinkedInIntegrationState()
-        ])
-        setAutoState(auto)
-        setLinkedinState(linkedin)
-
-        const gate = await canPublishScheduledPost({
-          contentStatus: 'scheduled',
-          qualityGateStatus: 'passed',
-          confidenceScore: 85,
-          personalContextStatus: 'passed'
-        })
-        setGateResult(gate)
+        const res = await fetch('/api/control-room/status')
+        if (res.ok) {
+          const json = await res.json()
+          setData(json)
+        }
       } catch (err) {
-        console.error('Failed to load control room status:', err)
+        console.error('Failed to load control room status API:', err)
       } finally {
         setLoading(false)
       }
     }
-    loadControlRoomData()
+    loadStatus()
   }, [])
+
+  const autoState = data?.automation
+  const linkedinState = data?.linkedin
+  const nextPost = data?.next_post
+  const gateResult = data?.publishing_gate
 
   return (
     <div className="page">
@@ -84,26 +106,42 @@ export default function TodayPage() {
 
       {/* REAL NEXT POST & PUBLISHING ELIGIBILITY STATUS CARD */}
       <div className="card card-pad" style={{ marginBottom: '1.5rem', borderColor: gateResult?.allowed ? 'var(--green)' : 'var(--border)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
-          <div>
-            <span className="badge badge-primary" style={{ marginBottom: '0.5rem', display: 'inline-block' }}>
+        {nextPost ? (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <span className="badge badge-primary" style={{ marginBottom: '0.5rem', display: 'inline-block' }}>
+                  NEXT SCHEDULED POST
+                </span>
+                <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: '0.25rem 0 0.5rem 0' }}>
+                  {nextPost.title}
+                </h2>
+                <p style={{ fontSize: '0.825rem', color: 'var(--text-2)', margin: 0 }}>
+                  Scheduled for <strong>{nextPost.planned_date} · {nextPost.pillar} Pillar</strong>
+                </p>
+              </div>
+
+              <div style={{ textAlign: 'right' }}>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>Quality Gate Status</p>
+                <span className={`badge ${nextPost.quality_gate_status === 'passed' ? 'badge-green' : 'badge-yellow'}`} style={{ marginTop: '0.25rem', display: 'inline-block' }}>
+                  QUALITY: {nextPost.quality_gate_status.toUpperCase()} {nextPost.confidence_score ? `(${nextPost.confidence_score}%)` : ''}
+                </span>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div style={{ padding: '1rem 0', textAlign: 'center' }}>
+            <span className="badge badge-gray" style={{ marginBottom: '0.5rem', display: 'inline-block' }}>
               NEXT SCHEDULED POST
             </span>
-            <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: '0.25rem 0 0.5rem 0' }}>
-              Why Indian Textiles Are Having a Global Moment
-            </h2>
-            <p style={{ fontSize: '0.825rem', color: 'var(--text-2)', margin: 0 }}>
-              Scheduled for <strong>Thursday · Educational Pillar</strong>
+            <p style={{ fontSize: '1rem', color: 'var(--text-2)', fontWeight: 500, margin: '0.25rem 0' }}>
+              No scheduled post yet
+            </p>
+            <p style={{ fontSize: '0.775rem', color: 'var(--text-3)', margin: 0 }}>
+              Use the Post Editor or Weekly Scheduler to queue future content.
             </p>
           </div>
-
-          <div style={{ textAlign: 'right' }}>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>Quality Gate Status</p>
-            <span className="badge badge-green" style={{ marginTop: '0.25rem', display: 'inline-block' }}>
-              QUALITY: PASSED (Score 85%)
-            </span>
-          </div>
-        </div>
+        )}
 
         <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div>
