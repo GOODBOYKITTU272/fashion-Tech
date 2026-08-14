@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 export interface LinkedInIntegrationState {
   integration_status: 'NOT_CONFIGURED' | 'WAITING_FOR_API_ACCESS' | 'READY_FOR_OAUTH' | 'CONNECTED' | 'REAUTH_REQUIRED' | 'PERMISSION_MISSING' | 'PAUSED' | 'ERROR'
@@ -32,7 +32,8 @@ export async function getLinkedInIntegrationState(userId: string): Promise<Linke
   }
 
   try {
-    const { data, error } = await supabase
+    const admin = getSupabaseAdmin()
+    const { data, error } = await admin
       .from('linkedin_connections')
       .select('integration_status, auth_status, granted_scopes, expires_at, last_verified_at, reauthorization_required, linkedin_member_urn')
       .eq('user_id', userId)

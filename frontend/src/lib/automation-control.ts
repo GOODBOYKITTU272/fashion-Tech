@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 export interface AutomationState {
   auto_mode_enabled: boolean
@@ -20,7 +20,8 @@ export async function getAutomationState(userId: string): Promise<AutomationStat
   }
 
   try {
-    const { data, error } = await supabase
+    const admin = getSupabaseAdmin()
+    const { data, error } = await admin
       .from('automation_settings')
       .select('auto_mode_enabled, pause_all_publishing, min_confidence_score, updated_at')
       .eq('user_id', userId)
@@ -28,20 +29,43 @@ export async function getAutomationState(userId: string): Promise<AutomationStat
       .limit(1)
 
     if (error || !data || data.length === 0) {
-      // Fail closed if state is missing or unverified
+      // If no row exists yet, insert default initial row for the user
+      const now = new Date().toISOString()
+      const { data: newRow, error: insertErr } = await admin
+        .from('automation_settings')
+        .upsert({
+          user_id: userId,
+          auto_mode_enabled: true,
+          pause_all_publishing: false,
+          min_confidence_score: 70,
+          updated_at: now
+        }, { onConflict: 'user_id' })
+        .select()
+        .single()
+
+      if (insertErr || !newRow) {
+        return {
+          auto_mode_enabled: false,
+          pause_all_publishing: true,
+          min_confidence_score: 70,
+          state_valid: false,
+          updated_at: null
+        }
+      }
+
       return {
-        auto_mode_enabled: false,
-        pause_all_publishing: true,
-        min_confidence_score: 70,
-        state_valid: false,
-        updated_at: null
+        auto_mode_enabled: newRow.auto_mode_enabled ?? true,
+        pause_all_publishing: newRow.pause_all_publishing ?? false,
+        min_confidence_score: newRow.min_confidence_score ?? 70,
+        state_valid: true,
+        updated_at: newRow.updated_at || null
       }
     }
 
     const row = data[0]
     return {
-      auto_mode_enabled: row.auto_mode_enabled ?? false,
-      pause_all_publishing: row.pause_all_publishing ?? true,
+      auto_mode_enabled: row.auto_mode_enabled ?? true,
+      pause_all_publishing: row.pause_all_publishing ?? false,
       min_confidence_score: row.min_confidence_score ?? 70,
       state_valid: true,
       updated_at: row.updated_at || null
