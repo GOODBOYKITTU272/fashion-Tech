@@ -27,6 +27,127 @@ export interface CarouselGenerationResult {
 }
 
 /**
+ * Technical Fashion Illustration Vector Helpers
+ */
+function drawMannequin(doc: any, cx: number, cy: number, scale = 1.0) {
+  doc.save()
+  doc.translate(cx, cy)
+  doc.scale(scale)
+
+  // 1. Grid/Axis reference lines
+  doc.lineWidth(0.4).strokeColor('#e5e5e0')
+  doc.moveTo(-70, 100).lineTo(70, 100).stroke() // Chest axis
+  doc.moveTo(-50, 160).lineTo(50, 160).stroke() // Waist axis
+  doc.moveTo(-60, 210).lineTo(60, 210).stroke() // Hip axis
+  doc.moveTo(0, 0).lineTo(0, 270).stroke() // Center front axis
+
+  // 2. Faint circle construction
+  doc.circle(0, 50, 35).stroke()
+
+  // 3. Mannequin contours
+  doc.lineWidth(0.9).strokeColor('#2e2c29')
+  doc.moveTo(-12, 20).lineTo(12, 20) // neck top
+  doc.lineTo(15, 35).lineTo(30, 50) // shoulder right
+  doc.lineTo(25, 95) // armhole right
+  doc.quadraticCurveTo(16, 125, 14, 160) // waist right
+  doc.quadraticCurveTo(20, 185, 24, 215) // hip right
+  doc.lineTo(-24, 215) // bottom hem
+  doc.quadraticCurveTo(-20, 185, -14, 160) // waist left
+  doc.quadraticCurveTo(-16, 125, -25, 95) // armhole left
+  doc.lineTo(-30, 50).lineTo(-15, 35).lineTo(-12, 20)
+  doc.stroke()
+
+  // 4. Seam lines
+  doc.lineWidth(0.45).strokeColor('#696560')
+  doc.moveTo(-8, 50).quadraticCurveTo(-5, 160, -9, 215).stroke() // side seams front left
+  doc.moveTo(8, 50).quadraticCurveTo(5, 160, 9, 215).stroke() // side seams front right
+
+  // 5. Wooden stand/base
+  doc.lineWidth(1.2).strokeColor('#3c3a37')
+  doc.moveTo(0, 215).lineTo(0, 280).stroke() // center pole
+  doc.moveTo(-25, 280).lineTo(25, 280).stroke() // base plate
+
+  doc.restore()
+}
+
+function drawPatternDraft(doc: any, cx: number, cy: number, scale = 1.0) {
+  doc.save()
+  doc.translate(cx, cy)
+  doc.scale(scale)
+
+  // 1. Faint grid paper background
+  doc.lineWidth(0.3).strokeColor('#eaeae5')
+  for (let x = -80; x <= 80; x += 16) {
+    doc.moveTo(x, -20).lineTo(x, 240).stroke()
+  }
+  for (let y = -20; y <= 240; y += 16) {
+    doc.moveTo(-80, y).lineTo(80, y).stroke()
+  }
+
+  // 2. Front bodice pattern outline
+  doc.lineWidth(0.95).strokeColor('#2e2c29')
+  doc.moveTo(0, 0) // neck point
+  doc.lineTo(45, 12) // shoulder seam
+  doc.bezierCurveTo(50, 28, 32, 50, 38, 68) // armhole curve
+  doc.lineTo(18, 175) // side seam
+  doc.lineTo(-12, 175) // waist hem
+  doc.lineTo(-12, 18) // center front line
+  doc.closePath().stroke()
+
+  // 3. Sewing allowance dashed lines
+  doc.lineWidth(0.45).dash(3, { space: 2 }).strokeColor('#7c7974')
+  doc.moveTo(-6, -6)
+  doc.lineTo(51, 6)
+  doc.lineTo(56, 68)
+  doc.lineTo(24, 181)
+  doc.lineTo(-18, 181)
+  doc.lineTo(-18, 12)
+  doc.closePath().stroke()
+  doc.undash()
+
+  // 4. Grainline indicator arrow
+  doc.lineWidth(0.7).strokeColor('#2e2c29')
+  doc.moveTo(8, 35).lineTo(8, 145).stroke()
+  doc.moveTo(5, 40).lineTo(8, 35).lineTo(11, 40).stroke()
+  doc.moveTo(5, 140).lineTo(8, 145).lineTo(11, 140).stroke()
+
+  doc.restore()
+}
+
+function drawDrapingSketch(doc: any, cx: number, cy: number, scale = 1.0) {
+  doc.save()
+  doc.translate(cx, cy)
+  doc.scale(scale)
+
+  // 1. Subtle placeholder mannequin base
+  doc.lineWidth(0.35).strokeColor('#e5e5e0')
+  doc.moveTo(-16, 25).lineTo(16, 25)
+  doc.lineTo(22, 40).lineTo(20, 80).lineTo(12, 130).lineTo(-12, 130).lineTo(-20, 80).lineTo(-22, 40).closePath().stroke()
+  doc.moveTo(0, 130).lineTo(0, 240).stroke()
+
+  // 2. Elegant draping curves representing folded textile drapes
+  doc.lineWidth(0.95).strokeColor('#2e2c29')
+  doc.moveTo(-16, 25).bezierCurveTo(6, 60, -6, 100, 14, 135).stroke()
+  doc.moveTo(11, 30).bezierCurveTo(-11, 70, 6, 90, -9, 135).stroke()
+  doc.moveTo(-22, 40).bezierCurveTo(0, 65, 12, 85, -6, 135).stroke()
+
+  // 3. Hanging drape folds below waistline
+  doc.moveTo(14, 135).bezierCurveTo(22, 170, 16, 210, 20, 240).stroke()
+  doc.moveTo(-9, 135).bezierCurveTo(-17, 170, -11, 205, -14, 240).stroke()
+
+  doc.restore()
+}
+
+function drawDotPattern(doc: any, x: number, y: number) {
+  doc.save()
+  doc.fillColor('#bcbab5')
+  for (let i = 0; i < 4; i++) {
+    doc.circle(x, y + i * 8, 1.2).fill()
+  }
+  doc.restore()
+}
+
+/**
  * generateLinkedInPdfCarousel
  * Generates an adaptive 6-8 page 4:5 aspect ratio editorial PDF document for LinkedIn carousels.
  * Adopts clean editorial fashion aesthetics (Code x Craft x Contemporary Design).
@@ -75,42 +196,88 @@ export async function generateLinkedInPdfCarousel(input: CarouselGenerationInput
     for (const slide of slides) {
       doc.addPage()
 
-      // Canvas Background
+      // Beige/Warm Cream background
+      doc.rect(0, 0, 432, 540).fill('#FAF6F0')
+
+      // Grid/Border layout line (Top Margin divider)
+      doc.lineWidth(0.55).strokeColor('#e5e5e0')
+      doc.moveTo(36, 36).lineTo(396, 36).stroke()
+
+      // Header Labels
+      doc.fillColor('#696560').font('Helvetica').fontSize(7.5)
+      doc.text('CODE × CRAFT', 36, 44, { characterSpacing: 1.2 })
+      doc.text(`0${slide.slide_number}`, 380, 44)
+
+      // Footer divider & Labels
+      doc.lineWidth(0.45).strokeColor('#eaeae5')
+      doc.moveTo(36, 492).lineTo(396, 492).stroke()
+      doc.fillColor('#7c7974').fontSize(7)
+      doc.text('Pranavi | Fashion Design Journey', 36, 499)
+
+      // Main content grids
       if (slide.type === 'hook') {
-        doc.rect(0, 0, 432, 540).fill('#18181b')
-        
-        // Minimal Indian Craft Linework Header Accent
-        doc.rect(36, 36, 360, 2).fill('#818cf8')
+        // Left Column (Text copy)
+        doc.fillColor('#1c1b19')
+           .font('Times-Roman')
+           .fontSize(31)
+           .text(slide.heading, 36, 90, { width: 170, lineGap: 4 })
 
-        doc.fillColor('#93c5fd').fontSize(9).text('CODE × CRAFT × CONTEMPORARY DESIGN', 36, 50, { characterSpacing: 1 })
+        doc.lineWidth(0.85).strokeColor('#c3c0b9')
+        doc.moveTo(36, 230).lineTo(90, 230).stroke()
 
-        doc.fillColor('#ffffff').fontSize(22).text(slide.heading, 36, 120, { width: 360, lineGap: 6 })
+        doc.fillColor('#2e2c29')
+           .font('Helvetica')
+           .fontSize(11.5)
+           .text(slide.body, 36, 252, { width: 170, lineGap: 5.5 })
 
-        doc.fillColor('#e4e4e7').fontSize(12).text(slide.body, 36, 260, { width: 360, lineGap: 4 })
+        // Technical Mannequin Illustration on the right
+        drawMannequin(doc, 300, 110, 1.1)
 
-        doc.fillColor('#a1a1aa').fontSize(9).text('SWIPE FOR THE DEEP DIVE →', 36, 480)
+        // Dot decoration
+        drawDotPattern(doc, 36, 430)
       } else if (slide.type === 'cta') {
-        doc.rect(0, 0, 432, 540).fill('#09090b')
-        doc.rect(36, 36, 360, 2).fill('#818cf8')
+        doc.fillColor('#1c1b19')
+           .font('Times-Roman')
+           .fontSize(25)
+           .text(slide.heading, 36, 90, { width: 170, lineGap: 3 })
 
-        doc.fillColor('#818cf8').fontSize(16).text(slide.heading, 36, 70, { width: 360 })
+        doc.lineWidth(0.85).strokeColor('#c3c0b9')
+        doc.moveTo(36, 190).lineTo(90, 190).stroke()
 
-        doc.fillColor('#d4d4d8').fontSize(11).text(slide.body, 36, 140, { width: 360, lineGap: 6 })
+        doc.fillColor('#2e2c29')
+           .font('Helvetica')
+           .fontSize(11)
+           .text(slide.body, 36, 212, { width: 170, lineGap: 5 })
 
-        doc.fillColor('#71717a').fontSize(8).text('PRANAVI YADAV · FASHION TECH ENGINE', 36, 480)
+        // technical illustration
+        drawDrapingSketch(doc, 305, 110, 1.05)
+
+        drawDotPattern(doc, 36, 430)
       } else {
-        doc.rect(0, 0, 432, 540).fill('#09090b')
+        // Slide Specific illustration selector
+        if (slide.slide_number % 3 === 2) {
+          drawPatternDraft(doc, 305, 115, 1.05)
+        } else if (slide.slide_number % 3 === 0) {
+          drawMannequin(doc, 300, 110, 1.1)
+        } else {
+          drawDrapingSketch(doc, 305, 110, 1.05)
+        }
 
-        // Top Accent Bar
-        doc.rect(36, 36, 360, 1).fill('#27272a')
+        // Left Column Title & Divider
+        doc.fillColor('#1c1b19')
+           .font('Times-Roman')
+           .fontSize(28)
+           .text(slide.heading, 36, 90, { width: 170, lineGap: 3.5 })
 
-        doc.fillColor('#818cf8').fontSize(8).text(`SLIDE 0${slide.slide_number} / 0${slides.length}`, 36, 46)
+        doc.lineWidth(0.85).strokeColor('#c3c0b9')
+        doc.moveTo(36, 210).lineTo(90, 210).stroke()
 
-        doc.fillColor('#ffffff').fontSize(17).text(slide.heading, 36, 80, { width: 360, lineGap: 4 })
+        doc.fillColor('#2e2c29')
+           .font('Helvetica')
+           .fontSize(11)
+           .text(slide.body, 36, 230, { width: 170, lineGap: 5.5 })
 
-        doc.fillColor('#e4e4e7').fontSize(11).text(slide.body, 36, 170, { width: 360, lineGap: 6 })
-
-        doc.fillColor('#71717a').fontSize(8).text('PRANAVI YADAV · FASHION TECH', 36, 480)
+        drawDotPattern(doc, 36, 430)
       }
     }
 
@@ -121,14 +288,26 @@ export async function generateLinkedInPdfCarousel(input: CarouselGenerationInput
       doc.on('end', () => resolve(Buffer.concat(buffers)))
     })
 
-    // Generate Cover SVG/Buffer
+    // Generate Cover SVG (Beige Warm Cream Style)
     const coverSvg = `<svg width="1080" height="1350" xmlns="http://www.w3.org/2000/svg">
-      <rect width="1080" height="1350" fill="#18181b"/>
-      <rect x="90" y="90" width="900" height="6" fill="#818cf8"/>
-      <text x="90" y="160" font-family="Helvetica, Arial, sans-serif" font-size="24" fill="#93c5fd" letter-spacing="3">CODE × CRAFT × CONTEMPORARY DESIGN</text>
-      <text x="90" y="320" font-family="Helvetica, Arial, sans-serif" font-size="54" font-weight="bold" fill="#ffffff">${escapeXml(input.title)}</text>
-      <text x="90" y="680" font-family="Helvetica, Arial, sans-serif" font-size="28" fill="#e4e4e7">${escapeXml(input.hook.substring(0, 180))}</text>
-      <text x="90" y="1200" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#a1a1aa">SWIPE FOR THE DEEP DIVE →</text>
+      <rect width="1080" height="1350" fill="#FAF6F0"/>
+      <line x1="90" y1="90" x2="990" y2="90" stroke="#e5e5e0" stroke-width="2"/>
+      <text x="90" y="116" font-family="Helvetica, Arial, sans-serif" font-size="20" fill="#696560" letter-spacing="3">CODE × CRAFT</text>
+      <text x="960" y="116" font-family="Helvetica, Arial, sans-serif" font-size="20" fill="#696560">01</text>
+      
+      <text x="90" y="320" font-family="Georgia, Times New Roman, serif" font-size="72" fill="#1c1b19" width="460">${escapeXml(input.title)}</text>
+      <line x1="90" y1="580" x2="220" y2="580" stroke="#c3c0b9" stroke-width="2"/>
+      <text x="90" y="640" font-family="Helvetica, Arial, sans-serif" font-size="28" fill="#2e2c29" width="460">${escapeXml(input.hook.substring(0, 180))}</text>
+      
+      <!-- Vector Mannequin path placeholder on SVG Cover -->
+      <g transform="translate(720, 240) scale(2.2)" stroke="#2e2c29" stroke-width="1.5" fill="none">
+        <path d="M -12 20 L 12 20 L 15 35 L 30 50 L 25 95 Q 16 125 14 160 Q 20 185 24 215 L -24 215 Q -20 185 -14 160 Q -16 125 -25 95 L -30 50 L -15 35 Z"/>
+        <path d="M 0 0 L 0 270" stroke="#e5e5e0" stroke-width="1"/>
+        <path d="M 0 215 L 0 280 M -25 280 L 25 280" stroke="#3c3a37" stroke-width="2"/>
+      </g>
+      
+      <line x1="90" y1="1230" x2="990" y2="1230" stroke="#eaeae5" stroke-width="1"/>
+      <text x="90" y="1270" font-family="Helvetica, Arial, sans-serif" font-size="18" fill="#7c7974">Pranavi | Fashion Design Journey</text>
     </svg>`
     const coverBuffer = Buffer.from(coverSvg, 'utf-8')
 
@@ -171,8 +350,8 @@ export async function generateLinkedInPdfCarousel(input: CarouselGenerationInput
       carousel_pdf_url: pdfUrl,
       carousel_cover_url: coverUrl,
       slide_count: slides.length,
-      renderer_version: 'pdfkit_editorial_v1.5',
-      design_template: 'code_craft_contemporary_womenswear'
+      renderer_version: 'pdfkit_editorial_v2.0',
+      design_template: 'editorial_serif_beige'
     }
   } catch (err: any) {
     console.error('LinkedIn PDF Carousel Generation Error:', err)
@@ -181,8 +360,8 @@ export async function generateLinkedInPdfCarousel(input: CarouselGenerationInput
       carousel_pdf_url: '',
       carousel_cover_url: '',
       slide_count: 0,
-      renderer_version: 'pdfkit_editorial_v1.5',
-      design_template: 'code_craft_contemporary_womenswear',
+      renderer_version: 'pdfkit_editorial_v2.0',
+      design_template: 'editorial_serif_beige',
       error: err.message
     }
   }
