@@ -6,11 +6,6 @@ import { useRouter } from 'next/navigation'
 import { authenticatedFetch } from '@/lib/authenticated-fetch'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const PILLARS = [
-  { label: 'Educational', color: 'var(--primary)', bg: 'var(--primary-dim)' },
-  { label: 'Storytelling', color: 'var(--accent)', bg: 'var(--accent-dim)' },
-  { label: 'Soft Selling', color: 'var(--green)', bg: 'var(--green-dim)' },
-]
 
 interface CalendarPost {
   id: string
@@ -18,10 +13,12 @@ interface CalendarPost {
   title: string
   planned_date: string
   planned_time: string
+  raw_planned_time: string
   pillar: string
   format: string
   quality_gate_status: string
   publishing_status: string
+  approval_status: 'pending_approval' | 'approved' | 'rejected' | 'changes_requested'
   source: 'internal' | 'linkedin_native' | 'zernio'
   external_platform: string | null
   provenance: string
@@ -43,8 +40,6 @@ export default function CalendarPage() {
   }
 
   const monday = getMondayDate(weekOffset)
-  
-  // Calculate start and end dates (YYYY-MM-DD)
   const formatDate = (date: Date) => date.toISOString().split('T')[0]
   
   const weekDates = DAYS.map((_, i) => {
@@ -81,147 +76,161 @@ export default function CalendarPage() {
     postsByDate[p.planned_date].push(p)
   })
 
-  // Calculate dynamic weekly summary counts from visible week posts
-  const mix = { Educational: 0, Storytelling: 0, 'Soft Selling': 0 }
+  // Detect Scheduling Conflicts (posts sharing same date + time)
+  const conflicts: Array<{ date: string; time: string; count: number }> = []
+  const timeSlotGroups: Record<string, number> = {}
   posts.forEach(p => {
-    if (p.pillar.toLowerCase().includes('educational') || p.pillar.toLowerCase().includes('tech') || p.pillar.toLowerCase().includes('craft')) {
-      mix['Educational']++
-    } else if (p.pillar.toLowerCase().includes('personal') || p.pillar.toLowerCase().includes('story')) {
-      mix['Storytelling']++
-    } else {
-      mix['Soft Selling']++
+    const key = `${p.planned_date} at ${p.planned_time}`
+    timeSlotGroups[key] = (timeSlotGroups[key] || 0) + 1
+  })
+  Object.entries(timeSlotGroups).forEach(([key, count]) => {
+    if (count > 1) {
+      const [date, time] = key.split(' at ')
+      conflicts.push({ date, time, count })
     }
   })
 
-  const totalPosts = posts.length
+  // Map database technical statuses to human-friendly display titles
+  const getStatusLabel = (post: CalendarPost) => {
+    if (post.approval_status === 'approved') return 'Approved'
+    if (post.approval_status === 'rejected') return 'Blocked'
+    if (post.approval_status === 'changes_requested') return 'Needs approval'
+    if (post.publishing_status === 'published') return 'Published'
+    if (post.publishing_status === 'scheduled') return 'Scheduled'
+    if (post.quality_gate_status === 'PASSED') return 'Ready for approval'
+    return 'Draft'
+  }
 
-  const handleCardClick = (post: CalendarPost | null) => {
-    if (post) {
-      router.push(`/editor?title=${encodeURIComponent(post.title)}&pillar=${encodeURIComponent(post.pillar)}`)
-    } else {
-      router.push('/editor')
-    }
+  const getStatusBadgeClass = (post: CalendarPost) => {
+    const lbl = getStatusLabel(post)
+    if (lbl === 'Approved' || lbl === 'Published') return 'badge-green'
+    if (lbl === 'Blocked') return 'badge-red'
+    if (lbl === 'Needs approval' || lbl === 'Ready for approval') return 'badge-yellow'
+    return 'badge-gray'
+  }
+
+  const handleCardClick = (post: CalendarPost) => {
+    router.push(`/editor?id=${post.id}`)
   }
 
   return (
-    <div className="page">
+    <div className="page fade-up">
+      {/* Editorial Header */}
       <div className="page-header">
         <div>
+          <p className="section-label">CODE × CRAFT</p>
           <h1 className="page-title">Content Calendar</h1>
           <p className="page-subtitle">
-            Week of {weekDates[0].toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – {weekDates[6].toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} · {totalPosts} post{totalPosts !== 1 ? 's' : ''} scheduled
+            Week of {weekDates[0].toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – {weekDates[6].toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button className="btn btn-secondary btn-sm" onClick={() => setWeekOffset(w => w - 1)}>
-            ← Previous Week
+            ← Previous
           </button>
           <button className="btn btn-secondary btn-sm" onClick={() => setWeekOffset(0)}>
             Current Week
           </button>
           <button className="btn btn-secondary btn-sm" onClick={() => setWeekOffset(w => w + 1)}>
-            Next Week →
+            Next →
           </button>
           <Link href="/editor" className="btn btn-primary btn-sm">
-            + Add Post
+            + New Post
           </Link>
         </div>
       </div>
 
-      {/* Dynamic Weekly Mix Cards */}
-      <div className="stat-grid" style={{ marginBottom: '1.5rem' }}>
-        {PILLARS.map(p => (
-          <div key={p.label} className="stat-card" style={{ borderColor: p.color + '44', background: p.bg }}>
-            <p className="stat-label">{p.label}</p>
-            <p className="stat-value" style={{ color: p.color, fontSize: '2.5rem' }}>
-              {mix[p.label as keyof typeof mix]}
-            </p>
-            <p className="stat-sub" style={{ color: p.color + 'aa' }}>
-              {p.label === 'Educational' ? 'target: 2' : 'target: 1'}
-            </p>
-          </div>
-        ))}
-        <div className="stat-card">
-          <p className="stat-label">Total Visible Posts</p>
-          <p className="stat-value">{totalPosts}<span style={{ fontSize: '1.2rem', color: 'var(--text-3)' }}>/4</span></p>
-          <p className="stat-sub">{totalPosts >= 4 ? '✅ Target met' : `${4 - totalPosts} more recommended`}</p>
+      {/* Conflict Warning Banners */}
+      {conflicts.map((c, i) => (
+        <div key={i} className="badge badge-red" style={{ 
+          width: '100%', 
+          padding: '0.85rem 1.25rem', 
+          marginBottom: '1.5rem', 
+          justifyContent: 'flex-start',
+          borderRadius: 'var(--radius-sm)'
+        }}>
+          ⚠️ <b>Scheduling conflict:</b> {c.count} posts are set for {c.date} at {c.time}.
         </div>
-      </div>
+      ))}
 
-      {/* Desktop Calendar Grid */}
-      <div className="card card-pad" style={{ overflowX: 'auto' }}>
+      {/* Grid View */}
+      <div className="card" style={{ padding: '1.5rem', marginBottom: '2.5rem', border: '1px solid var(--border)' }}>
         <div className="cal-grid">
           {DAYS.map((d, i) => (
             <div key={d} className="cal-day-header">
-              {d}<br />
-              <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>{weekDates[i].getDate()}</span>
+              <div>{d}</div>
+              <div style={{ fontSize: '1.1rem', color: 'var(--text-primary)', marginTop: '2px' }}>{weekDates[i].getDate()}</div>
             </div>
           ))}
 
-          {weekDates.map((dateObj, i) => {
+          {weekDates.map(dateObj => {
             const dateStr = formatDate(dateObj)
             const dayPosts = postsByDate[dateStr] || []
 
             return (
               <div
                 key={dateStr}
-                className={`cal-slot ${dayPosts.length > 0 ? 'has-post' : ''}`}
+                className="cal-slot"
                 style={{
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  minHeight: '140px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '0.4rem',
-                  padding: '0.5rem'
+                  gap: '0.5rem',
+                  minHeight: '130px'
                 }}
               >
                 {dayPosts.length > 0 ? (
                   dayPosts.map(p => {
-                    const isNative = p.source === 'linkedin_native'
+                    const label = getStatusLabel(p)
                     return (
                       <div
                         key={p.id}
                         onClick={() => handleCardClick(p)}
                         style={{
-                          background: isNative ? 'rgba(129, 140, 248, 0.1)' : 'rgba(255,255,255,0.03)',
-                          border: isNative ? '1px solid #818cf8' : '1px solid var(--border)',
-                          borderRadius: '4px',
-                          padding: '0.4rem',
-                          fontSize: '0.75rem'
+                          background: 'var(--bg)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '0.5rem',
+                          cursor: 'pointer'
                         }}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
-                          <span className={`badge ${isNative ? 'badge-primary' : 'badge-blue'}`} style={{ fontSize: '0.58rem' }}>
-                            {isNative ? 'LINKEDIN NATIVE' : p.pillar}
-                          </span>
-                          <span style={{ fontSize: '0.62rem', color: 'var(--text-3)' }}>{p.planned_time}</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                          <span style={{ fontWeight: 600 }}>{p.format.toUpperCase()}</span>
+                          <span>{p.planned_time.split(' ')[0]}</span>
                         </div>
-                        <p style={{ fontSize: '0.725rem', color: 'var(--text)', fontWeight: 500, margin: '0.2rem 0', lineHeight: 1.25 }}>
+                        <p style={{ 
+                          fontSize: '0.76rem', 
+                          fontWeight: 500, 
+                          color: 'var(--text-primary)', 
+                          lineHeight: 1.2, 
+                          marginBottom: '0.4rem',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden'
+                        }}>
                           {p.title}
                         </p>
-                        <span className={`badge ${isNative ? 'badge-gray' : (p.quality_gate_status === 'PASSED' ? 'badge-green' : 'badge-yellow')}`} style={{ fontSize: '0.58rem' }}>
-                          {isNative ? 'NOT EVALUATED' : p.quality_gate_status}
+                        <span className={`badge ${getStatusBadgeClass(p)}`} style={{ fontSize: '0.58rem', padding: '0.1rem 0.35rem' }}>
+                          {label}
                         </span>
                       </div>
                     )
                   })
                 ) : (
-                  <div
-                    onClick={() => router.push(`/editor?date=${dateStr}`)}
+                  <Link
+                    href={`/editor?date=${dateStr}`}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       height: '100%',
-                      color: 'var(--text-3)',
-                      fontSize: '1.25rem'
+                      color: 'var(--text-tertiary)',
+                      fontSize: '1.2rem'
                     }}
-                    title="Add post for this date"
                   >
                     +
-                  </div>
+                  </Link>
                 )}
               </div>
             )
@@ -229,52 +238,47 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {/* Post List View for Selected Week */}
-      <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        <h2 className="section-title">Posts Scheduled for This Week ({totalPosts})</h2>
-        {posts.length > 0 ? (
-          posts.map(p => {
-            const isNative = p.source === 'linkedin_native'
-            return (
+      {/* Editorial Timeline / List View */}
+      <div>
+        <p className="section-label">TIMELINE VIEW</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {posts.length > 0 ? (
+            posts.map(p => (
               <div
                 key={p.id}
                 onClick={() => handleCardClick(p)}
                 className="card card-pad-sm"
                 style={{
                   display: 'flex',
-                  gap: '0.75rem',
+                  gap: '1.5rem',
                   alignItems: 'center',
-                  cursor: 'pointer',
-                  border: isNative ? '1px solid #818cf8' : '1px solid var(--border)'
+                  cursor: 'pointer'
                 }}
               >
-                <div style={{ width: '80px', textAlign: 'center' }}>
-                  <p style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 600 }}>{p.planned_date}</p>
-                  <p style={{ fontSize: '0.65rem', color: 'var(--primary)' }}>{p.planned_time}</p>
+                <div style={{ width: '85px', textAlign: 'left', borderRight: '1px solid var(--border)', paddingRight: '1rem' }}>
+                  <p style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>{p.planned_date.substring(5)}</p>
+                  <p style={{ fontSize: '0.68rem', color: 'var(--accent)', marginTop: '2px' }}>{p.planned_time}</p>
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: '0.2rem' }}>
-                    <span className={`badge ${isNative ? 'badge-primary' : 'badge-blue'}`} style={{ fontSize: '0.65rem' }}>
-                      {isNative ? 'LINKEDIN NATIVE' : 'INTERNAL ENGINE'}
-                    </span>
-                    {isNative && <span className="badge badge-gray" style={{ fontSize: '0.65rem' }}>MANUAL IMPORT</span>}
-                    <span className="badge badge-gray" style={{ fontSize: '0.65rem' }}>{p.pillar} · {p.format}</span>
+                    <span className="badge badge-primary" style={{ fontSize: '0.62rem' }}>{p.pillar}</span>
+                    <span className="badge badge-blue" style={{ fontSize: '0.62rem' }}>{p.format}</span>
                   </div>
-                  <h3 style={{ fontSize: '0.875rem', fontWeight: 500, margin: 0 }}>{p.title}</h3>
+                  <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1rem', fontWeight: 400, color: 'var(--text-primary)' }}>{p.title}</h3>
                 </div>
-                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                  <span className={`badge ${isNative ? 'badge-gray' : (p.quality_gate_status === 'PASSED' ? 'badge-green' : 'badge-yellow')}`}>
-                    Quality: {isNative ? 'NOT EVALUATED' : p.quality_gate_status}
+                <div>
+                  <span className={`badge ${getStatusBadgeClass(p)}`}>
+                    {getStatusLabel(p)}
                   </span>
                 </div>
               </div>
-            )
-          })
-        ) : (
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-3)', textAlign: 'center', margin: '1rem 0' }}>
-            No posts scheduled for this week. Use week navigation above to view other weeks or click <strong>+ Add Post</strong>.
-          </p>
-        )}
+            ))
+          ) : (
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem 0' }}>
+              No scheduled posts for this week.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   )

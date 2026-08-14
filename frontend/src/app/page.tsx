@@ -3,8 +3,7 @@
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { authenticatedFetch } from '@/lib/authenticated-fetch'
-import { RESEARCH_CHANNELS } from '@/lib/research-channels'
-import { FASHION_QUERY_PACK } from '@/lib/fashion-query-pack'
+import { supabase } from '@/lib/supabase'
 
 interface UpcomingPost {
   id: string
@@ -18,13 +17,11 @@ interface UpcomingPost {
   confidence_score: number | null
   image_status: string
   image_url: string | null
+  carousel_pdf_url?: string | null
+  carousel_cover_url?: string | null
   publishing_status: string
   source?: 'internal' | 'linkedin_native' | 'zernio'
-  external_platform?: string | null
-  external_status?: string | null
-  external_timezone?: string | null
-  external_scheduled_at?: string | null
-  provenance: string
+  approval_status: 'pending_approval' | 'approved' | 'rejected' | 'changes_requested'
 }
 
 interface ResearchSignal {
@@ -33,92 +30,20 @@ interface ResearchSignal {
   url: string
   title: string
   category: string
-  platform?: string
-  query_used?: string
-  relevance_status?: string
   relevance_score?: number
-  topic_family?: string
   relevance_reason?: string
   captured_at: string
-  processed: boolean
-}
-
-interface ProductionEngine {
-  vercel_cron: string
-  last_pipeline_run: {
-    run_id: string
-    started_at: string
-    completed_at: string | null
-    current_stage: string
-    status: string
-    error_code: string | null
-    failure_reason: string | null
-  } | null
-  last_successful_run: {
-    run_id: string
-    completed_at: string
-  } | null
-  stages: {
-    w1_research: { status: string; last_run_at?: string; tool: string }
-    w2_scoring: { status: string; provider: string; model: string }
-    w3_drafting: { status: string; text_model: string; image_model: string }
-    w4_quality_gate: { status: string; visual_asset_enforced: boolean }
-    w5_scheduler: { status: string; cadence: string }
-    w6_dry_run: { status: string; transport: string }
-  }
-  research_sources: Array<{ name: string; url: string; type: string; status: string }>
-  tools: {
-    rss_http: string
-    jina_reader: string
-    agent_reach_cli: string
-    agent_reach_production: string
-  }
 }
 
 interface ControlRoomStatusData {
-  automation: {
-    auto_mode_enabled: boolean
-    pause_all_publishing: boolean
-    min_confidence_score: number
-    state_valid: boolean
-  }
-  linkedin: {
-    integration_status: string
-    auth_status: string
-    granted_scopes: string[]
-    can_publish: boolean
-  }
-  next_post: {
-    id: string
-    title: string
-    pillar: string
-    format: string
-    planned_date: string
-    planned_time: string | null
-    status: string
-    quality_gate_status: string
-    confidence_score: number | null
-  } | null
-  publishing_gate: {
-    allowed: boolean
-    reason_code: string
-    reasons: string[]
-  }
   upcoming_posts: UpcomingPost[]
   recent_signals: ResearchSignal[]
-  sync_mode?: string
-  production_engine: ProductionEngine | null
 }
 
 export default function TodayPage() {
   const [data, setData] = useState<ControlRoomStatusData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [dryRunLoading, setDryRunLoading] = useState(false)
-  const [dryRunResult, setDryRunResult] = useState<any>(null)
-  const [pipelineLoading, setPipelineLoading] = useState(false)
-  const [pipelineResult, setPipelineResult] = useState<any>(null)
-  const [ingestLoading, setIngestLoading] = useState(false)
-  const [ingestResult, setIngestResult] = useState<any>(null)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   const loadStatus = async () => {
     try {
@@ -138,335 +63,274 @@ export default function TodayPage() {
     loadStatus()
   }, [])
 
-  const handleRunDryTest = async (validateOnly = false) => {
-    setDryRunLoading(true)
-    setDryRunResult(null)
+  // Action Handlers for Post Approvals
+  const handleApprove = async (postId: string) => {
+    setActionLoading(postId)
     try {
-      const res = await authenticatedFetch('/api/publisher/dry-run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          calendarId: nextPost?.id,
-          validateOnly
+      const { error } = await supabase
+        .from('content_calendar')
+        .update({
+          approval_status: 'approved',
+          approved_at: new Date().toISOString(),
+          approved_by: 'pranavi'
         })
-      })
-      const json = await res.json()
-      setDryRunResult(json)
-    } catch (err: any) {
-      setDryRunResult({
-        success: false,
-        status: 'ERROR',
-        reasons: [err.message || 'Dry test request failed']
-      })
-    } finally {
-      setDryRunLoading(false)
-    }
-  }
+        .eq('id', postId)
 
-  const handleTriggerIngestion = async () => {
-    setIngestLoading(true)
-    setIngestResult(null)
-    try {
-      const res = await authenticatedFetch('/api/signals/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
-      const json = await res.json()
-      setIngestResult(json)
+      if (error) throw error
       await loadStatus()
-    } catch (err: any) {
-      setIngestResult({
-        success: false,
-        errors: [err.message || 'Ingestion request failed']
-      })
+    } catch (err) {
+      console.error('Failed to approve post:', err)
     } finally {
-      setIngestLoading(false)
+      setActionLoading(null)
     }
   }
 
-  const handleRunFullPipeline = async () => {
-    setPipelineLoading(true)
-    setPipelineResult(null)
+  const handleReject = async (postId: string) => {
+    setActionLoading(postId)
     try {
-      const res = await authenticatedFetch('/api/signals/process', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
-      const json = await res.json()
-      setPipelineResult(json)
+      const { error } = await supabase
+        .from('content_calendar')
+        .update({
+          approval_status: 'rejected',
+          quality_gate_status: 'failed'
+        })
+        .eq('id', postId)
+
+      if (error) throw error
       await loadStatus()
-    } catch (err: any) {
-      setPipelineResult({
-        success: false,
-        error: err.message || 'Pipeline execution failed'
-      })
+    } catch (err) {
+      console.error('Failed to reject post:', err)
     } finally {
-      setPipelineLoading(false)
+      setActionLoading(null)
     }
   }
 
-  const autoState = data?.automation
-  const linkedinState = data?.linkedin
-  const nextPost = data?.next_post
-  const gateResult = data?.publishing_gate
-  const engine = data?.production_engine
+  if (loading) {
+    return (
+      <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+        <p style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', color: 'var(--text-secondary)' }}>
+          Loading your editorial desk...
+        </p>
+      </div>
+    )
+  }
+
   const upcomingPosts = data?.upcoming_posts || []
   const recentSignals = data?.recent_signals || []
 
-  const isZernioConnected = linkedinState?.integration_status === 'ZERNIO_CONNECTED' || linkedinState?.can_publish
+  // Find next post awaiting approval, or fallback to the most imminent post
+  const nextPost = upcomingPosts.find(p => p.approval_status === 'pending_approval') || upcomingPosts[0]
+
+  // Filter 3 strongest signals sorted by relevance score
+  const topSignals = [...recentSignals]
+    .sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0))
+    .slice(0, 3)
+
+  // Compute current week's timeline dates (Mon, Tue, Thu, Fri)
+  const getWeekDate = (dayIndex: number) => {
+    const d = new Date()
+    const day = d.getDay()
+    const diff = d.getDate() - (day === 0 ? 6 : day - 1) + dayIndex
+    const target = new Date(d.setDate(diff))
+    return target.toISOString().split('T')[0]
+  }
+
+  const timelineSlots = [
+    { label: 'Mon', date: getWeekDate(0) },
+    { label: 'Tue', date: getWeekDate(1) },
+    { label: 'Thu', date: getWeekDate(3) },
+    { label: 'Fri', date: getWeekDate(4) }
+  ]
 
   return (
-    <div className="page">
-      <div className="page-header">
+    <div className="page fade-up">
+      {/* 1. EDITORIAL HEADER */}
+      <div className="page-header" style={{ marginBottom: '2.5rem' }}>
         <div>
-          <h1 className="page-title">Today&apos;s Inbox</h1>
-          <p className="page-subtitle">
-            {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })} · Production system status &amp; content engine
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button 
-            disabled={pipelineLoading}
-            className="btn btn-primary btn-sm"
-            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)' }}
-            onClick={handleRunFullPipeline}
-          >
-            {pipelineLoading ? 'Running Pipeline...' : '⚡ Run W1→W6 Pipeline'}
-          </button>
-
-          <button 
-            disabled={ingestLoading}
-            className="btn btn-secondary btn-sm"
-            onClick={handleTriggerIngestion}
-          >
-            {ingestLoading ? 'Syncing...' : '🔄 Sync Research Sources'}
-          </button>
+          <p className="section-label" style={{ marginBottom: '0.2rem' }}>CODE × CRAFT</p>
+          <h1 className="page-title" style={{ fontWeight: 400 }}>Good evening, Pranavi.</h1>
+          <p className="page-subtitle">Curated briefings for your fashion design journey</p>
         </div>
       </div>
 
-      {/* 1. PRODUCTION ENGINE STATUS VIEW */}
-      <div className="card card-pad" style={{ marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>⚙️</span> PRODUCTION ENGINE STATUS
-          </h2>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <span className="badge badge-blue">
-              VERCEL CRON: {engine?.vercel_cron || 'ACTIVE (0 2 * * *)'}
-            </span>
-            <span className={`badge ${autoState?.auto_mode_enabled ? 'badge-green' : 'badge-gray'}`}>
-              AUTO MODE: {autoState?.auto_mode_enabled ? 'ON' : 'OFF'}
-            </span>
-            {autoState?.pause_all_publishing && (
-              <span className="badge badge-red">⛔ PAUSE ALL PUBLISHING</span>
-            )}
-            <span className={`badge ${isZernioConnected ? 'badge-green' : 'badge-gray'}`}>
-              LIVE TRANSPORT: {isZernioConnected ? 'ZERNIO (ACTIVE)' : 'NOT SELECTED'}
-            </span>
-          </div>
-        </div>
-
-        {/* STAGES W1 -> W6 */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-          <div style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>W1 Research</p>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--green)', margin: '0.2rem 0' }}>ACTIVE</p>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-2)', margin: 0 }}>Safe HTTP RSS + Jina</p>
-          </div>
-
-          <div style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>W2 Scoring</p>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--green)', margin: '0.2rem 0' }}>ACTIVE</p>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-2)', margin: 0 }}>Gemini 3.5 Flash</p>
-          </div>
-
-          <div style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>W3 Drafting</p>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--green)', margin: '0.2rem 0' }}>ACTIVE</p>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-2)', margin: 0 }}>Gemini 3.5 + 3.1 Img</p>
-          </div>
-
-          <div style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>W4 Quality Gate</p>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--green)', margin: '0.2rem 0' }}>ACTIVE</p>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-2)', margin: 0 }}>Visual Asset Enforced</p>
-          </div>
-
-          <div style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>W5 Scheduler</p>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--green)', margin: '0.2rem 0' }}>ACTIVE</p>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-2)', margin: 0 }}>4 posts/week</p>
-          </div>
-
-          <div style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>W6 Publisher</p>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--green)', margin: '0.2rem 0' }}>ACTIVE</p>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-2)', margin: 0 }}>Zernio Live / DryRun</p>
-          </div>
-        </div>
-
-        {/* PIPELINE RUN TRACE */}
-        {engine?.last_pipeline_run && (
-          <div style={{ background: '#111', padding: '0.75rem', borderRadius: '6px', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <div>
-              Last Cloud Pipeline Run: <strong>{engine.last_pipeline_run.run_id}</strong> ({engine.last_pipeline_run.current_stage})
-            </div>
-            <div style={{ color: engine.last_pipeline_run.status === 'COMPLETED' ? 'var(--green)' : 'var(--accent)' }}>
-              Status: <strong>{engine.last_pipeline_run.status}</strong> {engine.last_pipeline_run.completed_at ? `(${new Date(engine.last_pipeline_run.completed_at).toLocaleTimeString()})` : ''}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* INGESTION & PIPELINE RESULT BANNERS */}
-      {ingestResult && (
-        <div className="card card-pad-sm" style={{ marginBottom: '1.5rem', background: ingestResult.success ? 'var(--green-dim)' : 'var(--accent-dim)', borderColor: 'var(--border)' }}>
-          <p style={{ fontWeight: 600, fontSize: '0.85rem', color: ingestResult.success ? 'var(--green)' : 'var(--accent)' }}>
-            📡 Research Ingestion: Discovered {ingestResult.signals_discovered ?? 0} | Accepted (Relevant): {ingestResult.signals_accepted ?? 0} | Rejected: {ingestResult.signals_rejected ?? 0} | Deduplicated: {ingestResult.signals_deduplicated ?? 0}
-          </p>
-        </div>
-      )}
-
-      {pipelineResult && (
-        <div className="card card-pad-sm" style={{ marginBottom: '1.5rem', background: pipelineResult.status === 'COMPLETED' ? 'var(--green-dim)' : 'var(--accent-dim)', borderColor: 'var(--border)' }}>
-          <p style={{ fontWeight: 600, fontSize: '0.85rem', color: pipelineResult.status === 'COMPLETED' ? 'var(--green)' : 'var(--accent)' }}>
-            ⚡ Pipeline Run Trace ({pipelineResult.run_id}): {pipelineResult.status}
-          </p>
-          {pipelineResult.failure_reason && (
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-2)', marginTop: '0.25rem' }}>
-              Reason: {pipelineResult.failure_reason}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* 2. UPCOMING LINKEDIN POSTS */}
-      <div className="card card-pad" style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>📅</span> UPCOMING LINKEDIN POSTS
-          </h2>
-          <span className="badge badge-gray" style={{ fontSize: '0.7rem' }}>
-            SYNC MODE: {data?.sync_mode || 'MANUAL_IMPORT'}
-          </span>
-        </div>
-
-        {upcomingPosts.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {upcomingPosts.map(post => {
-              const isNative = post.source === 'linkedin_native'
-              return (
-                <div key={post.id} style={{ background: '#18181b', padding: '0.85rem', borderRadius: '6px', border: isNative ? '1px solid #818cf8' : '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                  <div style={{ flex: 1, minWidth: '260px' }}>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.25rem' }}>
-                      <span className={`badge ${isNative ? 'badge-primary' : 'badge-blue'}`} style={{ fontSize: '0.7rem' }}>
-                        {isNative ? 'LINKEDIN NATIVE' : 'INTERNAL ENGINE'}
-                      </span>
-                      {isNative && <span className="badge badge-gray" style={{ fontSize: '0.7rem' }}>MANUAL IMPORT</span>}
-                      <span className="badge badge-gray" style={{ fontSize: '0.7rem' }}>{post.pillar} · {post.format}</span>
-                    </div>
-                    <h3 style={{ fontSize: '0.95rem', fontWeight: 600, margin: '0.2rem 0' }}>{post.title}</h3>
-                    <p style={{ fontSize: '0.775rem', color: 'var(--text-3)', margin: 0 }}>
-                      Scheduled: <strong>{post.planned_date} at 8:30 PM IST</strong> | Draft ID: <code>{post.draft_id || 'N/A'}</code>
-                    </p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '2.5rem' }}>
+        {/* 2. TODAY'S POST */}
+        <section>
+          <p className="section-label">TODAY&apos;S POST</p>
+          {nextPost ? (
+            <div className="card" style={{ border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: '280px' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <span className="badge badge-primary">{nextPost.pillar}</span>
+                    <span className="badge badge-blue">{nextPost.format}</span>
+                    {nextPost.approval_status === 'approved' && (
+                      <span className="badge badge-green">Scheduled for 8:30 PM IST</span>
+                    )}
+                    {nextPost.approval_status === 'pending_approval' && (
+                      <span className="badge badge-yellow">Needs Approval</span>
+                    )}
+                    {nextPost.approval_status === 'rejected' && (
+                      <span className="badge badge-red">Blocked</span>
+                    )}
                   </div>
 
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <span className={`badge ${isNative ? 'badge-gray' : (post.quality_gate_status === 'PASSED' ? 'badge-green' : 'badge-yellow')}`}>
-                      Quality Gate: {isNative ? 'NOT EVALUATED' : post.quality_gate_status}
-                    </span>
-                    <span className={`badge ${post.publishing_status === 'published' ? 'badge-green' : 'badge-blue'}`}>
-                      {post.publishing_status.toUpperCase()}
-                    </span>
+                  <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', fontWeight: 400, margin: '0.5rem 0 1rem 0', color: 'var(--text-primary)' }}>
+                    {nextPost.title}
+                  </h2>
+
+                  <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                    Scheduled: <strong>{nextPost.planned_date} at 8:30 PM IST</strong>
+                  </p>
+
+                  {/* Actions */}
+                  {nextPost.approval_status === 'pending_approval' ? (
+                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                      <button 
+                        disabled={actionLoading !== null}
+                        onClick={() => handleApprove(nextPost.id)}
+                        className="btn btn-primary btn-sm"
+                      >
+                        Approve
+                      </button>
+                      <button 
+                        disabled={actionLoading !== null}
+                        onClick={() => handleReject(nextPost.id)}
+                        className="btn btn-secondary btn-sm"
+                        style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
+                      >
+                        Reject
+                      </button>
+                      <Link href={`/editor?id=${nextPost.id}`} className="btn btn-secondary btn-sm">
+                        Edit
+                      </Link>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                      {nextPost.publishing_status === 'published' ? (
+                        <span className="badge badge-green">Published Live</span>
+                      ) : (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                          Status: <strong>{nextPost.approval_status.toUpperCase()}</strong>
+                        </span>
+                      )}
+                      <Link href={`/editor?id=${nextPost.id}`} className="btn btn-secondary btn-sm" style={{ padding: '0.35rem 0.75rem', fontSize: '0.7rem' }}>
+                        Modify Draft
+                      </Link>
+                    </div>
+                  )}
+                </div>
+
+                {/* Cover Preview Column */}
+                {(nextPost.carousel_cover_url || nextPost.image_url) && (
+                  <div style={{ width: '180px', flexShrink: 0 }}>
+                    <p className="section-label" style={{ fontSize: '0.65rem', marginBottom: '0.5rem' }}>Visual Asset</p>
+                    <div style={{ 
+                      aspectRatio: '4/5', 
+                      background: 'var(--bg)', 
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <img 
+                        src={nextPost.carousel_cover_url || nextPost.image_url || ''} 
+                        alt="Post visual preview"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="card text-muted" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+              <p>No upcoming posts scheduled. Visit the editor to draft new concepts.</p>
+            </div>
+          )}
+        </section>
+
+        {/* 3. TODAY'S RESEARCH */}
+        <section>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <p className="section-label" style={{ margin: 0 }}>TODAY&apos;S RESEARCH INTEL</p>
+            <Link href="/research" style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 600 }}>
+              VIEW ALL SIGNALS →
+            </Link>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {topSignals.length > 0 ? (
+              topSignals.map(sig => (
+                <div key={sig.id} className="card card-pad-sm" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                  <div style={{ flex: 1, minWidth: '260px' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.2rem' }}>
+                      <span className="badge badge-gray" style={{ fontSize: '0.65rem' }}>{sig.source_name}</span>
+                      <span className="badge badge-primary" style={{ fontSize: '0.65rem' }}>{sig.category}</span>
+                    </div>
+                    <h4 style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--text-primary)' }}>{sig.title}</h4>
+                    {sig.relevance_reason && (
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                        {sig.relevance_reason}
+                      </p>
+                    )}
+                  </div>
+                  <div className={`score-ring ${sig.relevance_score && sig.relevance_score >= 70 ? 'score-high' : 'score-mid'}`}>
+                    {sig.relevance_score}%
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textAlign: 'center', padding: '1.5rem' }}>
+                No recent signals available.
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* 4. THIS WEEK TIMELINE */}
+        <section style={{ marginBottom: '2.5rem' }}>
+          <p className="section-label">WEEKLY TIMELINE</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+            {timelineSlots.map(slot => {
+              const matchedPosts = upcomingPosts.filter(p => p.planned_date === slot.date)
+              const hasPost = matchedPosts.length > 0
+              const approvedPost = matchedPosts.find(p => p.approval_status === 'approved')
+
+              return (
+                <div key={slot.label} className="card card-pad-sm" style={{ 
+                  borderLeft: hasPost 
+                    ? (approvedPost ? '3px solid var(--success)' : '3px solid var(--warning)') 
+                    : '3px solid var(--border)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{slot.label}</span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>{slot.date}</span>
+                  </div>
+
+                  <div style={{ marginTop: '0.5rem' }}>
+                    {hasPost ? (
+                      <div>
+                        <p style={{ fontSize: '0.8rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {matchedPosts[0].title}
+                        </p>
+                        <span className="badge badge-gray" style={{ fontSize: '0.62rem', padding: '0.1rem 0.4rem', marginTop: '0.25rem' }}>
+                          {approvedPost ? 'Approved' : 'Needs Review'}
+                        </span>
+                      </div>
+                    ) : (
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+                        Empty slot
+                      </p>
+                    )}
                   </div>
                 </div>
               )
             })}
           </div>
-        ) : (
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-3)', textAlign: 'center', margin: '1rem 0' }}>
-            No upcoming calendar posts found. Click <strong>⚡ Run W1→W6 Pipeline</strong> to schedule fresh content.
-          </p>
-        )}
-      </div>
-
-      {/* 3. AGENT REACH & RESEARCH CHANNELS REGISTRY */}
-      <div className="card card-pad" style={{ marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span>🛰️</span> AGENT REACH RESEARCH CHANNELS &amp; RUNTIME REGISTRY
-        </h2>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem' }}>
-          {RESEARCH_CHANNELS.map(ch => (
-            <div key={ch.channel_id} style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{ch.channel_name}</span>
-                <span className={`badge ${ch.production_safe ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: '0.65rem' }}>
-                  {ch.production_safe ? `ACTIVE (${ch.runtime.toUpperCase()})` : `LOCAL_ONLY`}
-                </span>
-              </div>
-              <p style={{ fontSize: '0.725rem', color: 'var(--text-3)', margin: 0 }}>
-                Platform: <strong>{ch.platform}</strong> | Priority: <strong>{ch.priority}</strong>
-              </p>
-            </div>
-          ))}
-        </div>
-
-        {/* FASHION QUERY PACK CLUSTERS */}
-        <div style={{ paddingTop: '0.75rem', borderTop: '1px solid var(--border)' }}>
-          <p style={{ fontSize: '0.825rem', fontWeight: 600, margin: '0 0 0.5rem 0', color: 'var(--text-2)' }}>
-            🎯 Fashion Query Pack Clusters (Code × Craft × Contemporary Design):
-          </p>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {Object.values(FASHION_QUERY_PACK).map(cluster => (
-              <span key={cluster.id} className="badge badge-blue" style={{ fontSize: '0.7rem' }}>
-                {cluster.name} ({cluster.queries.length} queries)
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* 4. RECENT RESEARCH SIGNALS WITH RELEVANCE STATUS & PROVENANCE */}
-      <div className="card card-pad">
-        <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span>📡</span> DISCOVERED RESEARCH SIGNALS &amp; RELEVANCE GATE
-        </h2>
-
-        {recentSignals.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-            {recentSignals.map(sig => (
-              <div key={sig.id} style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <div style={{ flex: 1, minWidth: '240px' }}>
-                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: '0.2rem' }}>
-                    <span className="badge badge-gray" style={{ fontSize: '0.65rem' }}>{sig.platform || 'RSS'} · {sig.source_name}</span>
-                    <span className="badge badge-blue" style={{ fontSize: '0.65rem' }}>{sig.topic_family || sig.category}</span>
-                  </div>
-                  <h4 style={{ fontSize: '0.875rem', fontWeight: 500, margin: 0 }}>{sig.title}</h4>
-                  {sig.relevance_reason && (
-                    <p style={{ fontSize: '0.725rem', color: 'var(--text-3)', margin: '0.2rem 0 0 0' }}>
-                      Reason: {sig.relevance_reason}
-                    </p>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                  <span className={`badge ${sig.relevance_status === 'accepted' ? 'badge-green' : 'badge-red'}`} style={{ fontSize: '0.7rem' }}>
-                    {sig.relevance_status === 'accepted' ? `ACCEPTED (${sig.relevance_score ?? 75}%)` : `REJECTED (${sig.relevance_score ?? 30}%)`}
-                  </span>
-                  <span className={`badge ${sig.processed ? 'badge-gray' : 'badge-blue'}`} style={{ fontSize: '0.7rem' }}>
-                    {sig.processed ? 'PROCESSED' : 'UNPROCESSED (ELIGIBLE)'}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-3)', textAlign: 'center', margin: '1rem 0' }}>
-            No research signals ingested yet. Click <strong>🔄 Sync Research Sources</strong> to discover fresh fashion-tech articles.
-          </p>
-        )}
+        </section>
       </div>
     </div>
   )

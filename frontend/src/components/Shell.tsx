@@ -7,11 +7,11 @@ import { supabase } from '@/lib/supabase'
 const AUTHORIZED_EMAIL = 'pranaviyadav57@gmail.com'
 
 const NAV_ITEMS = [
-  { href: '/',          label: "Today's Inbox", icon: '⚡' },
-  { href: '/editor',    label: 'Post Editor',   icon: '✏️' },
-  { href: '/calendar',  label: 'Calendar',      icon: '📅' },
-  { href: '/analytics', label: 'Analytics',     icon: '📊' },
-  { href: '/settings',  label: 'Settings',      icon: '⚙️' },
+  { href: '/',          label: 'Today',      icon: '⚡' },
+  { href: '/calendar',  label: 'Calendar',   icon: '📅' },
+  { href: '/editor',    label: 'Create',     icon: '✏️' },
+  { href: '/research',  label: 'Research',   icon: '📡' },
+  { href: '/analytics', label: 'Analytics',  icon: '📊' },
 ]
 
 export default function Shell({ children }: { children: React.ReactNode }) {
@@ -29,7 +29,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       return
     }
 
-    // 1. Session check on mount and auth state change
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session || session.user?.email !== AUTHORIZED_EMAIL) {
@@ -68,8 +67,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   // Show minimal loading state while verifying auth session
   if (authenticated === null) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', color: 'var(--primary)' }}>
-        <p>Verifying session security...</p>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', color: 'var(--text-primary)' }}>
+        <p style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem' }}>Loading Fashion Engine...</p>
       </div>
     )
   }
@@ -83,10 +82,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       {/* DESKTOP SIDEBAR */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <span className="brand-icon">⚡</span>
+          <span className="brand-icon">✧</span>
           <div>
-            <p className="brand-name">Pranavi CE</p>
-            <p className="brand-tagline">CODE × CRAFT × DESIGN</p>
+            <p className="brand-name">Code × Craft</p>
+            <p className="brand-tagline">Studio Workspace</p>
           </div>
         </div>
 
@@ -104,19 +103,29 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </Link>
             )
           })}
+
+          <div className="editorial-divider" style={{ margin: '1rem 0' }}></div>
+
+          <Link
+            href="/settings"
+            className={`nav-item ${pathname.startsWith('/settings') ? 'active' : ''}`}
+          >
+            <span className="nav-icon">⚙️</span>
+            <span>Settings</span>
+          </Link>
         </nav>
 
         <div className="sidebar-footer">
           <div className="user-avatar">P</div>
           <div className="user-info">
             <p className="user-name">Pranavi</p>
-            <p className="user-role">Fashion Content Engine v1</p>
+            <p className="user-role">Fashion Design Studio</p>
           </div>
           <button 
             onClick={handleLogout}
-            className="btn btn-ghost btn-sm"
+            className="btn btn-secondary btn-sm"
             title="Sign Out"
-            style={{ marginLeft: 'auto', padding: '0.4rem 0.6rem', fontSize: '0.75rem', color: 'var(--red)' }}
+            style={{ padding: '0.35rem 0.5rem', border: 'none' }}
           >
             🚪
           </button>
@@ -125,9 +134,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
       {/* MOBILE TOP BAR */}
       <header className="mobile-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <span style={{ fontSize: '1.2rem' }}>⚡</span>
-          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem' }}>Pranavi CE</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ color: 'var(--accent)', fontSize: '1rem' }}>✧</span>
+          <span style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', fontWeight: 500 }}>Code × Craft</span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -146,7 +155,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <div className="mobile-drawer">
           <nav className="mobile-nav">
             {NAV_ITEMS.map(item => {
-              const active = pathname === item.href
+              const active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
               return (
                 <Link
                   key={item.href}
@@ -159,10 +168,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 </Link>
               )
             })}
+            <Link
+              href="/settings"
+              className={`mobile-nav-item ${pathname.startsWith('/settings') ? 'active' : ''}`}
+              onClick={() => setMobileOpen(false)}
+            >
+              <span>⚙️</span>
+              <span>Settings</span>
+            </Link>
             <button
               onClick={handleLogout}
               className="mobile-nav-item"
-              style={{ color: 'var(--red)', marginTop: '1rem', borderTop: '1px solid var(--border)' }}
+              style={{ color: 'var(--danger)', marginTop: '1rem', borderTop: '1px solid var(--border)' }}
             >
               <span>🚪</span>
               <span>Sign Out</span>
@@ -178,19 +195,21 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
       {/* MOBILE BOTTOM NAVIGATION BAR */}
       <nav className="mobile-bottom-nav">
-        {NAV_ITEMS.map(item => {
-          const active = pathname === item.href
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`bottom-nav-item ${active ? 'active' : ''}`}
-            >
-              <span className="bottom-nav-icon">{item.icon}</span>
-              <span className="bottom-nav-label">{item.label.split(' ')[0]}</span>
-            </Link>
-          )
-        })}
+        <div style={{ display: 'flex', width: '100%', height: '100%' }}>
+          {NAV_ITEMS.filter(item => item.label !== 'Research').map(item => {
+            const active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`bottom-nav-item ${active ? 'active' : ''}`}
+              >
+                <span className="bottom-nav-icon">{item.icon}</span>
+                <span className="bottom-nav-label">{item.label}</span>
+              </Link>
+            )
+          })}
+        </div>
       </nav>
     </div>
   )

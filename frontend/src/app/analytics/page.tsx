@@ -1,4 +1,5 @@
 'use client'
+
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
@@ -92,14 +93,13 @@ export default function AnalyticsPage() {
           const values = parseCSVLine(line)
           return headers.reduce((obj, header, index) => {
             obj[header.trim()] = values[index]?.trim() || ''
-            return obj;
+            return obj
           }, {} as Record<string, string>)
         })
 
         // Process follower metrics
         let processedCount = 0
         for (const row of parsedRows) {
-          // Look for common LinkedIn export column names
           const totalFollowers = Number(row['Total Followers'] || row['Followers'] || row['followers_total'] || 0)
           const impressions = Number(row['Impressions'] || row['impressions'] || 0)
           const reactions = Number(row['Reactions'] || row['reactions'] || 0)
@@ -107,12 +107,8 @@ export default function AnalyticsPage() {
           const reposts = Number(row['Reposts'] || row['reposts'] || 0)
           
           if (totalFollowers > 0 || impressions > 0) {
-            // First create a mock published post if importing post-specific stats
             let postId = null
             if (impressions > 0) {
-              const title = row['Post Title'] || row['Title'] || `LinkedIn Post - ${new Date().toLocaleDateString()}`
-              
-              // Insert into published_posts
               const { data: pubPost } = await supabase
                 .from('published_posts')
                 .insert({ linkedin_post_url: row['Post URL'] || row['url'] || '' })
@@ -122,14 +118,13 @@ export default function AnalyticsPage() {
               postId = pubPost?.id || null
             }
 
-            // Insert snapshot into post_metrics
             const { error: insertError } = await supabase
               .from('post_metrics')
               .insert({
                 published_post_id: postId,
                 followers_total: totalFollowers,
-                usa_followers: Number(row['USA Followers'] || row['usa_followers'] || Math.round(totalFollowers * 0.4)), // Fallback estimation
-                uk_followers: Number(row['UK Followers'] || row['uk_followers'] || Math.round(totalFollowers * 0.2)),   // Fallback estimation
+                usa_followers: Number(row['USA Followers'] || row['usa_followers'] || Math.round(totalFollowers * 0.4)),
+                uk_followers: Number(row['UK Followers'] || row['uk_followers'] || Math.round(totalFollowers * 0.2)),
                 impressions,
                 reactions,
                 comments,
@@ -153,7 +148,6 @@ export default function AnalyticsPage() {
     reader.readAsText(file)
   }
 
-  // Parse a CSV line handling quoted commas
   const parseCSVLine = (line: string) => {
     const result = []
     let current = ''
@@ -178,88 +172,87 @@ export default function AnalyticsPage() {
     : 0
 
   return (
-    <div className="page">
+    <div className="page fade-up">
+      {/* Page Header */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">Analytics</h1>
-          <p className="page-subtitle">Qualified USA + UK follower growth — your north-star metric</p>
+          <p className="section-label">CODE × CRAFT METRICS</p>
+          <h1 className="page-title">Performance Analytics</h1>
+          <p className="page-subtitle">Qualified USA + UK audience expansion metrics</p>
         </div>
       </div>
 
-      {/* KPI Header */}
-      <div className="card card-pad" style={{ background: 'linear-gradient(135deg, var(--primary-dim) 0%, rgba(244,162,97,0.08) 100%)', borderColor: 'rgba(155,93,229,0.3)', marginBottom: '1.5rem' }}>
-        <p className="stat-label" style={{ color: 'var(--primary)' }}>🏆 North-Star KPI</p>
-        <p style={{ fontFamily: 'var(--font-display)', fontSize: '3rem', fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.03em', marginTop: '0.25rem' }}>
-          {stats.usa_followers + stats.uk_followers > 0 ? `${stats.usa_followers + stats.uk_followers}` : '—'}
+      {/* KPI North-Star Board */}
+      <div className="card" style={{ border: '1px solid var(--border)', background: 'var(--bg-surface)', padding: '2rem', marginBottom: '2.5rem' }}>
+        <p className="section-label" style={{ color: 'var(--accent)', marginBottom: '0.5rem' }}>🏆 North-Star KPI Target</p>
+        <p style={{ fontFamily: 'var(--font-display)', fontSize: '3.6rem', fontWeight: 400, color: 'var(--text-primary)', lineHeight: 1 }}>
+          {stats.usa_followers + stats.uk_followers > 0 ? `${(stats.usa_followers + stats.uk_followers).toLocaleString()}` : '—'}
         </p>
-        <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', marginTop: '0.3rem' }}>
-          Total qualified followers from USA + UK ({targetQualifiedPct}% of total audience)
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.75rem' }}>
+          Combined qualified target market followers from USA and UK ({targetQualifiedPct > 0 ? `${targetQualifiedPct}%` : '—'} of total audience)
         </p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="stat-grid" style={{ marginBottom: '1.5rem' }}>
+      {/* Stats Block Grid */}
+      <div className="stat-grid" style={{ marginBottom: '2.5rem' }}>
         {[
-          { label: 'Total Followers',    value: stats.total_followers > 0 ? stats.total_followers.toLocaleString() : '—', sub: 'Audience size' },
-          { label: 'USA Followers',      value: stats.usa_followers > 0 ? stats.usa_followers.toLocaleString() : '—', sub: 'Target market' },
-          { label: 'UK Followers',       value: stats.uk_followers > 0 ? stats.uk_followers.toLocaleString() : '—', sub: 'Target market' },
-          { label: 'Total Impressions',  value: stats.impressions > 0 ? stats.impressions.toLocaleString() : '—', sub: 'Post views' },
-          { label: 'Total Engagement',   value: stats.reactions + stats.comments + stats.reposts > 0 ? (stats.reactions + stats.comments + stats.reposts).toLocaleString() : '—', sub: 'Reactions + Comments' },
-          { label: 'USA+UK Ratio',       value: targetQualifiedPct > 0 ? `${targetQualifiedPct}%` : '—', sub: 'Audience quality' },
-        ].map(s => (
-          <div key={s.label} className="stat-card">
-            <p className="stat-label">{s.label}</p>
-            <p className="stat-value">{s.value}</p>
-            <p className="stat-sub">{s.sub}</p>
+          { label: 'Total Followers', value: stats.total_followers > 0 ? stats.total_followers.toLocaleString() : '—', desc: 'Total network size' },
+          { label: 'USA Followers', value: stats.usa_followers > 0 ? stats.usa_followers.toLocaleString() : '—', desc: 'Primary target region' },
+          { label: 'UK Followers', value: stats.uk_followers > 0 ? stats.uk_followers.toLocaleString() : '—', desc: 'Secondary target region' },
+          { label: 'Total Impressions', value: stats.impressions > 0 ? stats.impressions.toLocaleString() : '—', desc: 'Total content impressions' },
+          { label: 'Total Engagement', value: stats.reactions + stats.comments + stats.reposts > 0 ? (stats.reactions + stats.comments + stats.reposts).toLocaleString() : '—', desc: 'Reactions, comments & reposts' }
+        ].map(item => (
+          <div key={item.label} className="stat-card" style={{ border: '1px solid var(--border)', background: 'var(--bg-surface)' }}>
+            <p className="stat-label">{item.label}</p>
+            <p className="stat-value" style={{ fontWeight: 400 }}>{item.value}</p>
+            <p className="stat-sub">{item.desc}</p>
           </div>
         ))}
       </div>
 
-      {/* Import CSV */}
-      <div className="card card-pad" style={{ marginBottom: '1.5rem' }}>
-        <h2 className="section-title">Import LinkedIn Analytics CSV</h2>
-        <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', marginBottom: '1.25rem' }}>
-          LinkedIn doesn&apos;t provide real-time automated APIs for personal pages. Upload your exported creator CSV here.
+      {/* CSV Import Form */}
+      <div className="card" style={{ border: '1px solid var(--border)', padding: '2rem', marginBottom: '2.5rem' }}>
+        <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', fontWeight: 400, marginBottom: '0.5rem' }}>Import Creator Performance CSV</h2>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+          LinkedIn personal profiles do not allow real-time API integrations. Import your CSV reports to synchronize follower metrics.
         </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem', marginBottom: '2rem' }}>
           {[
-            { step: '1', text: 'Go to LinkedIn → Analytics → Followers (or Post metrics)' },
-            { step: '2', text: 'Click "Export" in the top right to download the CSV' },
-            { step: '3', text: 'Select and upload that CSV file below' },
+            { step: '01', desc: 'Export Creator Analytics from LinkedIn settings panel.' },
+            { step: '02', desc: 'Download CSV file to your local computer directory.' },
+            { step: '03', desc: 'Select and drop the export CSV file into the space below.' }
           ].map(s => (
             <div key={s.step} style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
-              <span style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--primary-dim)',
-                color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                {s.step}
-              </span>
-              <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', paddingTop: '3px' }}>{s.text}</p>
+              <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.08em' }}>{s.step}</span>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{s.desc}</p>
             </div>
           ))}
         </div>
-        <div style={{ marginTop: '1.5rem', border: '2px dashed var(--border)', borderRadius: 'var(--radius)', padding: '2.5rem', textAlign: 'center', position: 'relative' }}>
+
+        <div style={{ 
+          border: '1px dashed var(--border)', 
+          borderRadius: 'var(--radius-sm)', 
+          padding: '3rem 2rem', 
+          textAlign: 'center', 
+          position: 'relative',
+          background: 'rgba(140, 123, 108, 0.02)'
+        }}>
           {loading ? (
-            <p style={{ color: 'var(--primary)' }}>Parsing files & updating Supabase...</p>
+            <p style={{ color: 'var(--accent)', fontWeight: 600 }}>Syncing metrics database...</p>
           ) : (
             <>
-              <p style={{ color: 'var(--text-3)', fontSize: '0.875rem', marginBottom: '1rem' }}>📄 Upload your exported LinkedIn CSV file</p>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>Drop your exported creator CSV file here</p>
               <input 
                 type="file" 
                 accept=".csv" 
                 onChange={handleCSVUpload} 
                 style={{ opacity: 0, position: 'absolute', inset: 0, cursor: 'pointer', width: '100%' }}
               />
-              <button className="btn btn-ghost btn-sm">Select CSV File</button>
+              <button className="btn btn-secondary btn-sm">Choose File</button>
             </>
           )}
         </div>
-      </div>
-
-      {/* KPI explanation */}
-      <div className="card card-pad">
-        <h2 className="section-title">Why USA + UK Qualified Follower Growth?</h2>
-        <p style={{ fontSize: 0.875 + 'rem', color: 'var(--text-2)', lineHeight: 1.6 }}>
-          Generic impressions are vanity metrics. Our primary KPI focuses exclusively on acquiring high-intent followers inside key geographical design centers (USA and UK). This builds direct brand equity before launching physical design collections or advisory services.
-        </p>
       </div>
     </div>
   )
