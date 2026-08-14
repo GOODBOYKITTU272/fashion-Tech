@@ -16,7 +16,7 @@ export type AutomationEventType =
 export type AutomationEventSeverity = 'info' | 'warning' | 'critical'
 
 export interface LogAutomationEventParams {
-  userId?: string
+  userId: string // REQUIRED: No optional parameter or fallback to hardcoded UUID
   eventType: AutomationEventType
   severity: AutomationEventSeverity
   message: string
@@ -26,16 +26,20 @@ export interface LogAutomationEventParams {
 export async function logAutomationEvent(params: LogAutomationEventParams): Promise<void> {
   const { userId, eventType, severity, message, metadata } = params
 
+  if (!userId) {
+    console.error('logAutomationEvent rejected: missing required userId.')
+    return
+  }
+
   try {
     const admin = getSupabaseAdmin()
-    const ownerUserId = userId || '22ff14e8-10c3-44b8-a77b-1a656e1255ef'
 
     // Deduplicate recent identical messages within 5 minutes to avoid log spam
     const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
     const { data: recent } = await admin
       .from('automation_events')
       .select('id')
-      .eq('user_id', ownerUserId)
+      .eq('user_id', userId)
       .eq('event_type', eventType)
       .eq('message', message)
       .gte('created_at', fiveMinsAgo)
@@ -46,7 +50,7 @@ export async function logAutomationEvent(params: LogAutomationEventParams): Prom
     }
 
     await admin.from('automation_events').insert({
-      user_id: ownerUserId,
+      user_id: userId,
       event_type: eventType,
       severity,
       message,

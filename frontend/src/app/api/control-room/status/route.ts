@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { verifyServerAuthorization } from '@/lib/auth-guard'
 import { getAutomationState } from '@/lib/automation-control'
 import { getLinkedInIntegrationState } from '@/lib/linkedin-control'
 import { getNextScheduledPost } from '@/lib/next-post-control'
@@ -9,27 +9,14 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(req: Request) {
   try {
-    const authHeader = req.headers.get('authorization')
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null
-
-    let userId: string | null = null
-
-    if (bearerToken) {
-      const admin = getSupabaseAdmin()
-      const { data: { user } } = await admin.auth.getUser(bearerToken)
-      if (user && user.email === 'pranaviyadav57@gmail.com') {
-        userId = user.id
-      }
+    const auth = await verifyServerAuthorization(req)
+    if (!auth.authorized || auth.response || !auth.userId) {
+      return auth.response || NextResponse.json({ error: '401 Unauthorized' }, { status: 401 })
     }
 
-    // Single-user fallback user resolution via admin client if token check in browser environment
-    if (!userId) {
-      const admin = getSupabaseAdmin()
-      const { data: usersData } = await admin.auth.admin.listUsers({ page: 1, perPage: 1 })
-      userId = usersData?.users?.[0]?.id || '22ff14e8-10c3-44b8-a77b-1a656e1255ef'
-    }
+    const userId = auth.userId
 
-    // Execute server-side operational state queries
+    // Execute server-side operational state queries strictly for authenticated userId
     const [automationState, linkedinState, nextPost] = await Promise.all([
       getAutomationState(userId),
       getLinkedInIntegrationState(userId),

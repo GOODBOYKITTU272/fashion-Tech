@@ -5,18 +5,15 @@ import { verifyServerAuthorization } from '@/lib/auth-guard'
 export async function POST(req: Request) {
   // Verify authorization
   const auth = await verifyServerAuthorization(req)
-  if (!auth.authorized) {
-    return auth.response!
+  if (!auth.authorized || !auth.userId) {
+    return auth.response || NextResponse.json({ error: '401 Unauthorized' }, { status: 401 })
   }
 
   try {
     const body = await req.json()
     const { auto_mode_enabled, pause_all_publishing, min_confidence_score } = body
-
+    const ownerUserId = auth.userId
     const admin = getSupabaseAdmin()
-
-    // Single-user owner user ID: 22ff14e8-10c3-44b8-a77b-1a656e1255ef
-    const ownerUserId = auth.userId || '22ff14e8-10c3-44b8-a77b-1a656e1255ef'
 
     const { data: updated, error } = await admin
       .from('automation_settings')

@@ -1,34 +1,48 @@
 import { NextResponse } from 'next/server'
+import { verifyServerAuthorization } from '@/lib/auth-guard'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { publishScheduledPost, validatePublisherPayload } from '@/lib/linkedin-publisher'
 
 export async function POST(req: Request) {
   try {
-    const authHeader = req.headers.get('authorization')
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null
+    // 1. Enforce strict server authorization (session verification & email check)
+    const auth = await verifyServerAuthorization(req)
+    if (!auth.authorized || auth.response || !auth.userId) {
+      return auth.response || NextResponse.json({ error: '401 Unauthorized' }, { status: 401 })
+    }
 
-    let userId: string | null = null
+    const userId = auth.userId
     const admin = getSupabaseAdmin()
-
-    if (bearerToken) {
-      const { data: { user } } = await admin.auth.getUser(bearerToken)
-      if (user && user.email === 'pranaviyadav57@gmail.com') {
-        userId = user.id
-      }
-    }
-
-    if (!userId) {
-      const { data: usersData } = await admin.auth.admin.listUsers({ page: 1, perPage: 1 })
-      userId = usersData?.users?.[0]?.id || '22ff14e8-10c3-44b8-a77b-1a656e1255ef'
-    }
-
     const body = await req.json().catch(() => ({}))
-    const calendarId = body.calendarId
+    let targetCalendarId = body.calendarId
 
-    // If no calendarId passed, check if user has any next scheduled calendar post to dry-test
-    let targetCalendarId = calendarId
+    // 2. Validate calendar item ownership if calendarId is provided
+    if (targetCalendarId) {
+      const { data: item, error: itemErr } = await admin
+        .from('content_calendar')
+        .select('id, user_id')
+        .eq('id', targetCalendarId)
+        .single()
 
-    if (!targetCalendarId) {
+      if (itemErr || !item) {
+        return NextResponse.json({
+          success: false,
+          status: 'BLOCKED',
+          reason_code: 'CONTENT_NOT_READY',
+          reasons: ['Scheduled calendar item not found.']
+        }, { status: 404 })
+      }
+
+      if (item.user_id !== userId) {
+        return NextResponse.json({
+          success: false,
+          status: 'BLOCKED',
+          reason_code: 'PERMISSION_MISSING',
+          reasons: ['Forbidden: You do not have permission to access this calendar item.']
+        }, { status: 403 })
+      }
+    } else {
+      // If calendarId is omitted, query next scheduled post strictly for authenticated user
       const todayStr = new Date().toISOString().split('T')[0]
       const { data: calItems } = await admin
         .from('content_calendar')
@@ -52,7 +66,7 @@ export async function POST(req: Request) {
       }, { status: 400 })
     }
 
-    // Execute dry-run publishing attempt
+    // 3. Execute dry-run publishing attempt with verified authenticated userId
     const mode = body.validateOnly ? 'validate' : 'dry-run'
     let result
 

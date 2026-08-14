@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
-import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { encryptToken } from '@/lib/crypto'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { AUTHORIZED_EMAIL } from '@/lib/auth-guard'
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -9,54 +10,49 @@ export async function GET(req: Request) {
   const errorDescription = searchParams.get('error_description')
 
   if (error) {
+    console.error('LinkedIn OAuth Callback Error:', error, errorDescription)
     return NextResponse.redirect(new URL(`/settings?error=${encodeURIComponent(errorDescription || error)}`, req.url))
   }
 
   if (!code) {
-    return NextResponse.redirect(new URL('/settings?error=No+authorization+code+received', req.url))
+    return NextResponse.redirect(new URL('/settings?error=Missing+authorization+code', req.url))
   }
 
   const clientId = process.env.LINKEDIN_CLIENT_ID
   const clientSecret = process.env.LINKEDIN_CLIENT_SECRET
-  const redirectUri = `${new URL(req.url).origin}/api/auth/linkedin/callback`
+  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || 'https://fashion-tech-delta.vercel.app'}/api/auth/linkedin/callback`
 
   if (!clientId || !clientSecret) {
-    // Return WAITING_FOR_API_ACCESS if developer app credentials not yet configured
-    return NextResponse.redirect(new URL('/settings?status=WAITING_FOR_API_ACCESS', req.url))
+    return NextResponse.redirect(new URL('/settings?error=LinkedIn+Developer+App+credentials+(LINKEDIN_CLIENT_ID)+are+not+configured+yet.+Integration+is+WAITING_FOR_API_ACCESS.', req.url))
   }
 
   try {
-    // 1. Exchange authorization code for LinkedIn access token
-    const tokenResponse = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+    // 1. Exchange code for access token via official LinkedIn Token Endpoint
+    const tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        code: code,
+        code,
         client_id: clientId,
         client_secret: clientSecret,
         redirect_uri: redirectUri
       })
     })
 
-    if (!tokenResponse.ok) {
-      const errText = await tokenResponse.text()
-      return NextResponse.redirect(new URL(`/settings?error=${encodeURIComponent('LinkedIn token exchange failed: ' + errText)}`, req.url))
+    const tokenData = await tokenRes.json()
+
+    if (!tokenRes.ok || !tokenData.access_token) {
+      const msg = tokenData.error_description || tokenData.error || 'Failed to exchange OAuth code for access token'
+      return NextResponse.redirect(new URL(`/settings?error=${encodeURIComponent(msg)}`, req.url))
     }
 
-    const tokenData = await tokenResponse.json()
-    if (!tokenData || !tokenData.access_token) {
-      return NextResponse.redirect(new URL('/settings?error=Token+exchange+succeeded+but+access_token+was+missing', req.url))
-    }
+    const accessToken: string = tokenData.access_token
+    const expiresInSeconds: number = tokenData.expires_in || 5184000 // 60 days default
+    const grantedScopes: string[] = tokenData.scope ? tokenData.scope.split(' ') : ['w_member_social', 'r_member_postAnalytics']
 
-    const accessToken = tokenData.access_token as string
-    const expiresInSeconds = Number(tokenData.expires_in || 5184000) // Default 60 days
-    const grantedScopes = typeof tokenData.scope === 'string' 
-      ? tokenData.scope.split(/[\s,]+/) 
-      : ['w_member_social', 'r_member_postAnalytics', 'r_member_profileAnalytics']
-
-    // 2. Fetch authenticated user URN from LinkedIn userinfo endpoint if scope permits
-    let memberUrn = null
+    // 2. Fetch LinkedIn Member URN if userinfo endpoint is accessible
+    let memberUrn: string | null = null
     try {
       const userinfoRes = await fetch('https://api.linkedin.com/v2/userinfo', {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -72,21 +68,16 @@ export async function GET(req: Request) {
     // 3. Encrypt the access token using AES-256-GCM (fails closed if encryption key missing)
     const encrypted = encryptToken(accessToken)
 
-    // 4. Obtain target system user_id via Supabase Admin Client
+    // 4. Obtain target system user_id specifically for AUTHORIZED_EMAIL via Supabase Admin Client
     const admin = getSupabaseAdmin()
-    const { data: usersData } = await admin.auth.admin.listUsers({ page: 1, perPage: 1 })
-    const targetUserId = usersData?.users?.[0]?.id
+    const { data: usersData } = await admin.auth.admin.listUsers()
+    const targetUser = usersData?.users?.find(u => u.email?.trim().toLowerCase() === AUTHORIZED_EMAIL)
 
-    if (!targetUserId) {
-      // Fallback query to find existing connections user_id or automation_settings user_id
-      const { data: existingConn } = await admin.from('linkedin_connections').select('user_id').limit(1)
-      if (!existingConn?.[0]?.user_id) {
-        return NextResponse.redirect(new URL('/settings?error=No+system+user_id+found+in+database+for+OAuth+persistence', req.url))
-      }
+    if (!targetUser) {
+      return NextResponse.redirect(new URL('/settings?error=Authorized+system+user+account+not+found+in+database', req.url))
     }
 
-    const ownerUserId = targetUserId || (await admin.from('linkedin_connections').select('user_id').limit(1)).data?.[0]?.user_id
-
+    const ownerUserId = targetUser.id
     const expiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString()
     const now = new Date().toISOString()
 
@@ -123,18 +114,12 @@ export async function GET(req: Request) {
       }, { onConflict: 'connection_id' })
 
     if (credError) {
-      // Revert connection status if secrets failed to save
-      await admin
-        .from('linkedin_connections')
-        .update({ integration_status: 'ERROR', auth_status: 'revoked', reauthorization_required: true })
-        .eq('id', connRecord.id)
-
-      throw new Error(`Failed to persist encrypted credentials: ${credError.message}`)
+      throw new Error(`Failed to persist encrypted access token: ${credError.message}`)
     }
 
-    // 7. SUCCESS — Redirect with status CONNECTED
-    return NextResponse.redirect(new URL('/settings?status=CONNECTED', req.url))
+    return NextResponse.redirect(new URL('/settings?success=LinkedIn+account+connected+successfully', req.url))
   } catch (err: any) {
-    return NextResponse.redirect(new URL(`/settings?error=${encodeURIComponent(err.message || 'OAuth persistence failed')}`, req.url))
+    console.error('LinkedIn OAuth Callback Exception:', err)
+    return NextResponse.redirect(new URL(`/settings?error=${encodeURIComponent(err.message || 'OAuth callback failed')}`, req.url))
   }
 }
