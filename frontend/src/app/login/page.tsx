@@ -13,13 +13,22 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // Redirect if already logged in
+  // Redirect if already logged in or if magic link token parsed
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user?.email === AUTHORIZED_EMAIL) {
         router.replace('/')
       }
     })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user?.email === AUTHORIZED_EMAIL) {
+        router.replace('/')
+        router.refresh()
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [router])
 
   const handleSendOtp = async (e: React.FormEvent) => {
@@ -35,11 +44,14 @@ export default function LoginPage() {
 
     setLoading(true)
     try {
-      // 2. Call Supabase OTP without creating new users
+      // 2. Call Supabase OTP with redirect_to pointing to current domain
+      const redirectOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://fashion-tech-delta.vercel.app'
+
       const { error } = await supabase.auth.signInWithOtp({
         email: normalizedEmail,
         options: {
-          shouldCreateUser: false
+          shouldCreateUser: false,
+          emailRedirectTo: redirectOrigin
         }
       })
 
@@ -49,7 +61,7 @@ export default function LoginPage() {
 
       setOtpSent(true)
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to send login code. Please try again.')
+      setErrorMsg(err.message || 'Failed to send login email. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -60,8 +72,8 @@ export default function LoginPage() {
     setErrorMsg(null)
     const token = otpToken.trim()
 
-    if (!token || token.length < 6) {
-      setErrorMsg('Please enter the 6-digit verification code.')
+    if (!token) {
+      setErrorMsg('Please enter the verification code.')
       return
     }
 
@@ -167,22 +179,22 @@ export default function LoginPage() {
             </button>
           </form>
         ) : (
-          /* STEP 2: Enter OTP Verification Code */
+          /* STEP 2: Enter Verification Code or Click Magic Link */
           <form onSubmit={handleVerifyOtp}>
             <div className="card card-pad-sm" style={{ background: 'rgba(255,255,255,0.03)', marginBottom: '1.25rem' }}>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-2)', margin: 0 }}>
-                Enter the verification code sent to <strong>{AUTHORIZED_EMAIL}</strong>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-2)', margin: 0, lineHeight: 1.5 }}>
+                📬 Check your inbox at <strong>{AUTHORIZED_EMAIL}</strong>.<br />
+                You can click the <strong>&quot;Sign in&quot;</strong> button in the email, or enter the code below:
               </p>
             </div>
             <div className="form-group">
-              <label className="form-label">One-Time Verification Code</label>
+              <label className="form-label">Verification Code</label>
               <input
                 type="text"
                 required
-                maxLength={6}
                 className="form-input"
-                placeholder="6-digit code"
-                style={{ textAlign: 'center', fontSize: '1.25rem', letterSpacing: '0.3em', fontWeight: 700 }}
+                placeholder="Enter code or paste token"
+                style={{ textAlign: 'center', fontSize: '1rem', fontWeight: 600 }}
                 value={otpToken}
                 onChange={(e) => setOtpToken(e.target.value)}
                 disabled={loading}
