@@ -1,0 +1,150 @@
+{
+  "name": "W5: Weekly Calendar",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "a908027a-b9c1-4384-9844-48f8c37dbe1e",
+      "name": "Trigger Sunday Evening",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT tc.id, tc.cluster_title, ts.total_opportunity_score \nFROM public.topic_clusters tc\nJOIN public.topic_scores ts ON ts.cluster_id = tc.id\nLEFT JOIN public.content_calendar cc ON cc.content_idea_id = tc.id\nWHERE cc.id IS NULL\nORDER BY ts.total_opportunity_score DESC\nLIMIT 4;"
+      },
+      "id": "e6a048fc-db7a-40a2-b9be-cc6547dde3b2",
+      "name": "Fetch Top Unscheduled Topics",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [300, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const posts = $input.all();\nconst weekStart = new Date();\n// set to next Monday\nconst day = weekStart.getDay();\nconst nextMondayOffset = day === 0 ? 1 : 8 - day;\nweekStart.setDate(weekStart.getDate() + nextMondayOffset);\n\nconst schedule = [\n  { offset: 0, pillar: 'Educational', format: 'carousel' }, // Mon\n  { offset: 2, pillar: 'Storytelling', format: 'text' },      // Wed\n  { offset: 3, pillar: 'Educational', format: 'carousel' }, // Thu\n  { offset: 5, pillar: 'Soft Selling', format: 'image' }      // Sat\n];\n\nreturn schedule.map((slot, index) => {\n  const date = new Date(weekStart);\n  date.setDate(date.getDate() + slot.offset);\n  const topic = posts[index] ? posts[index].json : null;\n  \n  return {\n    json: {\n      planned_date: date.toISOString().split('T')[0],\n      pillar: slot.pillar,\n      format: slot.format,\n      cluster_id: topic ? topic.id : null,\n      title: topic ? topic.cluster_title : 'Placeholder Topic'\n    }\n  };\n});"
+      },
+      "id": "2fe947eb-ba2c-47db-a2d9-11baae66e34c",
+      "name": "Map Days & Pillars",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "content_ideas",
+        "dataMode": "define",
+        "values": {
+          "cluster_id": "={{$json.cluster_id}}",
+          "title": "={{$json.title}}",
+          "angle": "Weekly suggested content",
+          "pillar": "={{$json.pillar}}",
+          "format": "={{$json.format}}",
+          "status": "pending"
+        }
+      },
+      "id": "fa5cf7e8-fa2c-47db-a2d9-11baae77e34d",
+      "name": "Create Content Ideas",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [700, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "content_calendar",
+        "dataMode": "define",
+        "values": {
+          "content_idea_id": "={{$json.id}}",
+          "planned_date": "={{$node[\"Map Days & Pillars\"].json.planned_date}}",
+          "pillar": "={{$node[\"Map Days & Pillars\"].json.pillar}}",
+          "format": "={{$node[\"Map Days & Pillars\"].json.format}}",
+          "status": "draft"
+        }
+      },
+      "id": "3be58d4a-3fb8-43da-a2e9-fbbe76cc5c2e",
+      "name": "Insert into Calendar",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Trigger Sunday Evening": {
+      "main": [
+        [
+          {
+            "node": "Fetch Top Unscheduled Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Top Unscheduled Topics": {
+      "main": [
+        [
+          {
+            "node": "Map Days & Pillars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Days & Pillars": {
+      "main": [
+        [
+          {
+            "node": "Create Content Ideas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Content Ideas": {
+      "main": [
+        [
+          {
+            "node": "Insert into Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

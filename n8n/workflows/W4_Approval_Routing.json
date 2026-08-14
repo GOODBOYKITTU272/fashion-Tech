@@ -1,0 +1,101 @@
+{
+  "name": "W4: Approval Routing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "route-approval",
+        "options": {}
+      },
+      "id": "e2ba87fe-cb72-4d2d-9eb0-12baae77e8a1",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "route-approval"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$env.TELEGRAM_BOT_TOKEN}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "9a084c7e-cb8a-40a2-b9be-cc6547dde4b3",
+      "name": "Has Telegram Token?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$env.TELEGRAM_CHAT_ID}}",
+        "text": "=⚡ *New Fashion Draft Ready\\!*\n\nTopic: {{$json.body.title}}\nScore: {{$json.body.score}}/100\n\nReview & edit here:\n{{$env.FRONTEND_URL || 'https://fashion-tech-delta.vercel.app'}}/editor?cluster={{$json.body.cluster_id}}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "da5cf7e8-fa2c-47db-a2d9-11baae77e34d",
+      "name": "Telegram Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [650, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-cred",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Notification routed"
+      },
+      "id": "3be58d4a-3fb8-43da-a2e9-fbbe76cc5c2e",
+      "name": "No-op / Log",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [650, 400]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Has Telegram Token?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Telegram Token?": {
+      "main": [
+        [
+          {
+            "node": "Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No-op / Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

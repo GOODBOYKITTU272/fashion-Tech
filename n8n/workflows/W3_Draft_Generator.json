@@ -7,25 +7,98 @@
         "path": "generate-draft",
         "options": {}
       },
-      "name": "Webhook (From Retool/Next.js)",
+      "id": "76dfc56c-0cb1-4348-910a-31bc5b7ec6f8",
+      "name": "Webhook (From Frontend)",
       "type": "n8n-nodes-base.webhook",
-      "position": [250, 300],
-      "webhookId": "generate-draft-hook"
+      "typeVersion": 1,
+      "position": [100, 300],
+      "webhookId": "generate-draft"
     },
     {
       "parameters": {
-        "model": "gpt-4",
-        "messages": {
-          "messageValues": [
+        "method": "POST",
+        "url": "={{$env.FRONTEND_URL || 'http://localhost:3000'}}/api/ai/draft",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
             {
-              "message": "You are a master LinkedIn copywriter. The user has selected topic: {{$json.body.topic}}. Generate 3 hook options, a draft body, and a carousel outline (if applicable) focusing on Code x Craft x Contemporary Design."
+              "name": "title",
+              "value": "={{$json.body.title}}"
+            },
+            {
+              "name": "summary",
+              "value": "={{$json.body.summary}}"
+            },
+            {
+              "name": "pillar",
+              "value": "={{$json.body.pillar}}"
+            },
+            {
+              "name": "format",
+              "value": "={{$json.body.format}}"
+            },
+            {
+              "name": "personalInput",
+              "value": "={{$json.body.personalInput}}"
             }
           ]
-        }
+        },
+        "options": {}
       },
-      "name": "OpenAI Copywriter",
-      "type": "n8n-nodes-base.openAi",
-      "position": [450, 300]
+      "id": "8f8c42ff-ca7b-48c2-a9b0-12f65a7ddb3a",
+      "name": "HTTP Request (Generate Draft)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [300, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nextjs-api-key",
+          "name": "NextJS Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.FRONTEND_URL || 'http://localhost:3000'}}/api/ai/carousel",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "postBody",
+              "value": "={{$json.body}}"
+            },
+            {
+              "name": "pillar",
+              "value": "={{$node[\"Webhook (From Frontend)\"].json.body.pillar}}"
+            },
+            {
+              "name": "topicSummary",
+              "value": "={{$node[\"Webhook (From Frontend)\"].json.body.summary}}"
+            },
+            {
+              "name": "hookSelected",
+              "value": "={{$json.hooks[0]}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9e2c4ef2-cb8a-40fa-ba4e-33f7c32e5ab1",
+      "name": "HTTP Request (Generate Carousel)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [500, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nextjs-api-key",
+          "name": "NextJS Header Auth"
+        }
+      }
     },
     {
       "parameters": {
@@ -33,26 +106,133 @@
         "table": "drafts",
         "dataMode": "define",
         "values": {
-          "content_idea_id": "={{$json.body.idea_id}}",
-          "carousel_outline": "={{$json.carousel}}",
-          "visual_brief": "={{$json.visuals}}"
+          "content_idea_id": "={{$node[\"Webhook (From Frontend)\"].json.body.content_idea_id}}",
+          "carousel_outline": "={{JSON.stringify($json.slides)}}",
+          "visual_brief": "={{JSON.stringify({template_family: $json.template_family, overall_visual_note: $json.overall_visual_note, image_generation_prompt: $json.image_generation_prompt})}}",
+          "fact_check_status": "pending"
         }
       },
+      "id": "da5cfb11-fa2c-47db-a2d9-11baae66e34c",
       "name": "Save Draft to Supabase",
       "type": "n8n-nodes-base.supabase",
-      "position": [650, 300]
+      "typeVersion": 1,
+      "position": [700, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "draft_versions",
+        "dataMode": "define",
+        "values": {
+          "draft_id": "={{$json.id}}",
+          "version_no": 1,
+          "author_type": "AI",
+          "hook": "={{$node[\"HTTP Request (Generate Draft)\"].json.hooks.join('\\n')}}",
+          "body": "={{$node[\"HTTP Request (Generate Draft)\"].json.body}}",
+          "cta": "={{$node[\"HTTP Request (Generate Draft)\"].json.cta}}",
+          "hashtags": "={{JSON.stringify($node[\"HTTP Request (Generate Draft)\"].json.hashtags)}}"
+        }
+      },
+      "id": "3be58d4a-3fb8-43da-a2e9-fbbe76cc5c2d",
+      "name": "Save Draft Version 1",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "table": "content_ideas",
+        "dataMode": "define",
+        "id": "={{$node[\"Webhook (From Frontend)\"].json.body.content_idea_id}}",
+        "values": {
+          "status": "drafted"
+        }
+      },
+      "id": "e72d2fb4-cf3d-4c4f-9e32-8415c92c81fb",
+      "name": "Update Idea Status",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1100, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
     }
   ],
   "connections": {
-    "Webhook (From Retool/Next.js)": {
+    "Webhook (From Frontend)": {
       "main": [
-        [{"node": "OpenAI Copywriter", "type": "main", "index": 0}]
+        [
+          {
+            "node": "HTTP Request (Generate Draft)",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "OpenAI Copywriter": {
+    "HTTP Request (Generate Draft)": {
       "main": [
-        [{"node": "Save Draft to Supabase", "type": "main", "index": 0}]
+        [
+          {
+            "node": "HTTP Request (Generate Carousel)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request (Generate Carousel)": {
+      "main": [
+        [
+          {
+            "node": "Save Draft to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Draft to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Save Draft Version 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Draft Version 1": {
+      "main": [
+        [
+          {
+            "node": "Update Idea Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
   }
 }

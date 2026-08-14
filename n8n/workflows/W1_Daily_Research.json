@@ -12,27 +12,53 @@
           ]
         }
       },
+      "id": "e445037d-ef72-4d2d-94be-8b2b64d1f2e1",
       "name": "Schedule Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
-      "position": [250, 300]
+      "typeVersion": 1.1,
+      "position": [200, 300]
     },
     {
       "parameters": {
         "operation": "executeQuery",
         "query": "SELECT * FROM public.sources WHERE is_active = true;"
       },
+      "id": "3bf540a9-2d8c-4bc4-b7be-c8317d74cc3a",
       "name": "Fetch Sources",
       "type": "n8n-nodes-base.supabase",
-      "position": [450, 300]
+      "typeVersion": 1,
+      "position": [400, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
     },
     {
       "parameters": {
-        "url": "={{$json.url}}",
-        "responseFormat": "json"
+        "method": "POST",
+        "url": "={{$env.AGENT_REACH_URL || 'http://localhost:8000'}}/scrape",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{$json.url}}"
+            },
+            {
+              "name": "source_id",
+              "value": "={{$json.id}}"
+            }
+          ]
+        },
+        "options": {}
       },
+      "id": "8f8c47f5-257a-40a2-a9b0-9cf6537dd2b5",
       "name": "HTTP Request (Agent Reach Scraper)",
       "type": "n8n-nodes-base.httpRequest",
-      "position": [650, 300]
+      "typeVersion": 4.1,
+      "position": [600, 300]
     },
     {
       "parameters": {
@@ -41,31 +67,63 @@
         "dataMode": "define",
         "values": {
           "source_id": "={{$json.source_id}}",
-          "url": "={{$json.article_url}}",
+          "url": "={{$json.url}}",
           "title": "={{$json.title}}",
-          "summary": "={{$json.summary}}"
+          "summary": "={{$json.summary}}",
+          "raw_content": "={{$json.raw_text}}",
+          "category": "={{$json.category}}"
         }
       },
+      "id": "c62047ff-fb74-4b53-a55e-deae95ea56b6",
       "name": "Save to Supabase",
       "type": "n8n-nodes-base.supabase",
-      "position": [850, 300]
+      "typeVersion": 1,
+      "position": [800, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
     }
   ],
   "connections": {
     "Schedule Trigger": {
       "main": [
-        [{"node": "Fetch Sources", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Fetch Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Fetch Sources": {
       "main": [
-        [{"node": "HTTP Request (Agent Reach Scraper)", "type": "main", "index": 0}]
+        [
+          {
+            "node": "HTTP Request (Agent Reach Scraper)",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "HTTP Request (Agent Reach Scraper)": {
       "main": [
-        [{"node": "Save to Supabase", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Save to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
   }
 }

@@ -12,63 +12,48 @@
           ]
         }
       },
+      "id": "a908027a-b9c1-4384-9844-48f8c37dbe1e",
       "name": "Trigger Post-Research",
       "type": "n8n-nodes-base.scheduleTrigger",
-      "position": [250, 300]
+      "typeVersion": 1.1,
+      "position": [200, 300]
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT * FROM public.research_signals WHERE processed = false;"
+        "method": "POST",
+        "url": "={{$env.FRONTEND_URL || 'http://localhost:3000'}}/api/signals/process",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
       },
-      "name": "Fetch Unprocessed Signals",
-      "type": "n8n-nodes-base.supabase",
-      "position": [450, 300]
-    },
-    {
-      "parameters": {
-        "model": "gpt-4",
-        "messages": {
-          "messageValues": [
-            {
-              "message": "You are a content scoring AI. Evaluate these signals against the Brand Profile: Code x Craft x Contemporary Design. Output JSON with scores (0-100) for US relevance, UK relevance, freshness, and Pranavi alignment."
-            }
-          ]
+      "id": "e6a048fc-db7a-40a2-b9be-cc6547dde3b2",
+      "name": "HTTP Request (Process Signals)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [400, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nextjs-api-key",
+          "name": "NextJS Header Auth"
         }
-      },
-      "name": "OpenAI Scorer",
-      "type": "n8n-nodes-base.openAi",
-      "position": [650, 300]
-    },
-    {
-      "parameters": {
-        "operation": "insert",
-        "table": "topic_scores",
-        "dataMode": "define",
-        "values": {
-          "total_opportunity_score": "={{$json.score.total}}"
-        }
-      },
-      "name": "Save Scores",
-      "type": "n8n-nodes-base.supabase",
-      "position": [850, 300]
+      }
     }
   ],
   "connections": {
     "Trigger Post-Research": {
       "main": [
-        [{"node": "Fetch Unprocessed Signals", "type": "main", "index": 0}]
-      ]
-    },
-    "Fetch Unprocessed Signals": {
-      "main": [
-        [{"node": "OpenAI Scorer", "type": "main", "index": 0}]
-      ]
-    },
-    "OpenAI Scorer": {
-      "main": [
-        [{"node": "Save Scores", "type": "main", "index": 0}]
+        [
+          {
+            "node": "HTTP Request (Process Signals)",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
   }
 }

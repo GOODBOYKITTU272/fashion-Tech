@@ -1,0 +1,162 @@
+{
+  "name": "W7: Weekly Review",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 22 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "e2ba87fe-cb72-4d2d-9eb0-12baae77e8a1",
+      "name": "Trigger Sunday Night",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM public.post_metrics WHERE snapshot_at >= NOW() - INTERVAL '7 days';"
+      },
+      "id": "9a084c7e-cb8a-40a2-b9be-cc6547dde4b3",
+      "name": "Fetch Weekly Metrics",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [300, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM public.brand_profile LIMIT 1;"
+      },
+      "id": "da5cf7e8-fa2c-47db-a2d9-11baae77e34d",
+      "name": "Fetch Brand Profile",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.FRONTEND_URL || 'http://localhost:3000'}}/api/ai/review",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "metrics",
+              "value": "={{$node[\"Fetch Weekly Metrics\"].json}}"
+            },
+            {
+              "name": "brandProfile",
+              "value": "={{$json}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3be58d4a-3fb8-43da-a2e9-fbbe76cc5c2e",
+      "name": "HTTP Request (AI Weekly Review)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [700, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "nextjs-api-key",
+          "name": "NextJS Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "weekly_reports",
+        "dataMode": "define",
+        "values": {
+          "week_start": "={{new Date().toISOString().split('T')[0]}}",
+          "summary": "={{$json.summary}}",
+          "recommendations": "={{JSON.stringify($json.recommendations)}}"
+        }
+      },
+      "id": "a6a048fc-db7a-40a2-b9be-cc6547dde3b2",
+      "name": "Save Weekly Report",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Trigger Sunday Night": {
+      "main": [
+        [
+          {
+            "node": "Fetch Weekly Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Weekly Metrics": {
+      "main": [
+        [
+          {
+            "node": "Fetch Brand Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Brand Profile": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request (AI Weekly Review)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request (AI Weekly Review)": {
+      "main": [
+        [
+          {
+            "node": "Save Weekly Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

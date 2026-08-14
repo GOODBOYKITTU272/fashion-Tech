@@ -1,0 +1,85 @@
+{
+  "name": "W6: Metrics Processing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "import-metrics",
+        "options": {}
+      },
+      "id": "e2ba87fe-cb72-4d2d-9eb0-12baae77e8a1",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "webhookId": "import-metrics"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const row = item.json.body || item.json;\n  // Normalize raw LinkedIn CSV columns to Supabase schema\n  return {\n    json: {\n      published_post_id: row.post_id || row.id,\n      impressions: Number(row.Impressions || row.impressions || 0),\n      reactions: Number(row.Reactions || row.reactions || 0),\n      comments: Number(row.Comments || row.comments || 0),\n      reposts: Number(row.Reposts || row.reposts || 0),\n      profile_views: Number(row.Views || row.profile_views || 0),\n      followers_total: Number(row.Followers || row.followers_total || 0),\n      usa_followers: Number(row.US_Followers || row.usa_followers || 0),\n      uk_followers: Number(row.UK_Followers || row.uk_followers || 0)\n    }\n  };\n});"
+      },
+      "id": "9a084c7e-cb8a-40a2-b9be-cc6547dde4b3",
+      "name": "Normalize Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "post_metrics",
+        "dataMode": "define",
+        "values": {
+          "published_post_id": "={{$json.published_post_id}}",
+          "impressions": "={{$json.impressions}}",
+          "reactions": "={{$json.reactions}}",
+          "comments": "={{$json.comments}}",
+          "reposts": "={{$json.reposts}}",
+          "profile_views": "={{$json.profile_views}}",
+          "followers_total": "={{$json.followers_total}}",
+          "usa_followers": "={{$json.usa_followers}}",
+          "uk_followers": "={{$json.uk_followers}}"
+        }
+      },
+      "id": "da5cf7e8-fa2c-47db-a2d9-11baae77e34d",
+      "name": "Save Metrics to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [600, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-cred",
+          "name": "Supabase Connection"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Metrics": {
+      "main": [
+        [
+          {
+            "node": "Save Metrics to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

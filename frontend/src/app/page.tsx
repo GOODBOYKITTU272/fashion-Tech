@@ -1,4 +1,6 @@
+export const dynamic = 'force-dynamic'
 import { getTopOpportunities } from '@/lib/data'
+
 
 function ScoreRing({ score }: { score: number }) {
   const cls = score >= 75 ? 'score-high' : score >= 50 ? 'score-mid' : 'score-low'
