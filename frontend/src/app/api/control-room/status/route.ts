@@ -5,8 +5,20 @@ import { getLinkedInIntegrationState } from '@/lib/linkedin-control'
 import { getNextScheduledPost } from '@/lib/next-post-control'
 import { canPublishScheduledPost } from '@/lib/publishing-gate'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { checkSystemServiceHealth } from '@/lib/service-health'
 
 export const dynamic = 'force-dynamic'
+
+function formatTimeToIST(timeStr: string | null): string {
+  if (!timeStr) return '8:30 PM IST'
+  const parts = timeStr.split(':')
+  if (parts.length < 2) return '8:30 PM IST'
+  let hours = parseInt(parts[0], 10)
+  const minutes = parts[1]
+  const ampm = hours >= 12 ? 'PM' : 'AM'
+  hours = hours % 12 || 12
+  return `${hours}:${minutes} ${ampm} IST`
+}
 
 export async function GET(req: Request) {
   try {
@@ -18,11 +30,15 @@ export async function GET(req: Request) {
     const userId = auth.userId
     const admin = getSupabaseAdmin()
 
-    // Pure READ ONLY operational state query
+    // Calculate current date in Asia/Kolkata timezone (YYYY-MM-DD)
+    const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+
+    // Pure READ ONLY query filtering for upcoming & today's unexpired scheduled posts
     const [
       automationState,
       linkedinState,
       nextPost,
+      healthCheck,
       { data: pipelineRuns },
       { data: upcomingPosts },
       { data: recentSignals }
@@ -30,15 +46,16 @@ export async function GET(req: Request) {
       getAutomationState(userId),
       getLinkedInIntegrationState(userId),
       getNextScheduledPost(userId),
+      checkSystemServiceHealth(),
       admin.from('pipeline_runs').select('*').eq('user_id', userId).order('started_at', { ascending: false }).limit(5),
-      admin.from('content_calendar').select('id, draft_id, planned_date, planned_time, pillar, format, status, quality_gate_status, confidence_score, source, external_platform, external_status, external_timezone, external_scheduled_at, created_at').eq('user_id', userId).order('planned_date', { ascending: true }).limit(10),
+      admin.from('content_calendar').select('id, draft_id, planned_date, planned_time, pillar, format, status, quality_gate_status, confidence_score, source, external_platform, external_status, external_timezone, external_scheduled_at, approval_status, carousel_pdf_url, carousel_cover_url, created_at').eq('user_id', userId).gte('planned_date', todayIST).order('planned_date', { ascending: true }).order('planned_time', { ascending: true }).limit(10),
       admin.from('research_signals').select('id, source_name, url, title, category, platform, query_used, relevance_status, relevance_score, topic_family, relevance_reason, captured_at, processed').order('captured_at', { ascending: false }).limit(10)
     ])
 
     const draftIds = (upcomingPosts || []).map(p => p.draft_id).filter(Boolean)
     let draftMap: Record<string, any> = {}
     if (draftIds.length > 0) {
-      const { data: draftRows } = await admin.from('drafts').select('id, title, image_generation_status, image_url, text_provider, text_model, image_provider, image_model').in('id', draftIds)
+      const { data: draftRows } = await admin.from('drafts').select('id, title, full_content, image_generation_status, image_url, text_provider, text_model, image_provider, image_model').in('id', draftIds)
       if (draftRows) {
         draftMap = Object.fromEntries(draftRows.map(d => [d.id, d]))
       }
@@ -51,13 +68,17 @@ export async function GET(req: Request) {
         draft_id: p.draft_id,
         title: draft?.title || `${p.pillar} Post`,
         planned_date: p.planned_date,
-        planned_time: p.planned_time ? `${p.planned_time} IST` : '8:30 PM IST',
+        planned_time: formatTimeToIST(p.planned_time),
+        raw_planned_time: p.planned_time,
         pillar: p.pillar,
         format: p.format,
         quality_gate_status: p.quality_gate_status ? p.quality_gate_status.toUpperCase() : 'NOT EVALUATED',
         confidence_score: p.confidence_score,
+        approval_status: p.approval_status || 'pending_approval',
         image_status: draft?.image_generation_status || 'none',
         image_url: draft?.image_url || null,
+        carousel_pdf_url: p.carousel_pdf_url || null,
+        carousel_cover_url: p.carousel_cover_url || null,
         publishing_status: p.status,
         source: p.source || 'internal',
         external_platform: p.external_platform || null,
@@ -88,6 +109,7 @@ export async function GET(req: Request) {
       upcoming_posts: formattedUpcomingPosts,
       recent_signals: recentSignals || [],
       sync_mode: 'MANUAL_IMPORT',
+      service_health: healthCheck,
       production_engine: {
         vercel_cron: 'ACTIVE (0 2 * * *)',
         last_pipeline_run: lastRun ? {
@@ -148,6 +170,7 @@ export async function GET(req: Request) {
       upcoming_posts: [],
       recent_signals: [],
       sync_mode: 'MANUAL_IMPORT',
+      service_health: null,
       publishing_gate: {
         allowed: false,
         reason_code: 'AUTOMATION_STATE_UNAVAILABLE',
