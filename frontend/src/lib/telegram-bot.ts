@@ -66,7 +66,8 @@ ${input.carousel_pdf_url ? `\n<b>PDF Carousel:</b> <a href="${input.carousel_pdf
   }
 
   try {
-    const endpoint = input.carousel_cover_url || input.image_url
+    const hasPhoto = !!((input.carousel_cover_url && !input.carousel_cover_url.endsWith('.svg')) || (input.image_url && !input.image_url.endsWith('.svg')))
+    const endpoint = hasPhoto
       ? `https://api.telegram.org/bot${botToken}/sendPhoto`
       : `https://api.telegram.org/bot${botToken}/sendMessage`
 
@@ -76,12 +77,13 @@ ${input.carousel_pdf_url ? `\n<b>PDF Carousel:</b> <a href="${input.carousel_pdf
       reply_markup: inlineKeyboard
     }
 
-    if (input.carousel_cover_url || input.image_url) {
+    if (hasPhoto) {
       payload.photo = input.carousel_cover_url || input.image_url
       payload.caption = messageText
     } else {
-      payload.text = messageText
+      payload.text = messageText + (input.carousel_cover_url ? `\n\n<b>Cover Preview:</b> <a href="${input.carousel_cover_url}">View Cover Image</a>` : '')
     }
+
 
     const res = await fetch(endpoint, {
       method: 'POST',
