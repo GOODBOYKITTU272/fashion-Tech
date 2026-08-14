@@ -17,6 +17,13 @@ export default function SettingsPage() {
   const [lastVerified, setLastVerified] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
+  const [researchSourcesStatus, setResearchSourcesStatus] = useState<Record<string, string>>({
+    rss: 'configured',
+    reddit: 'configured',
+    linkedin_public: 'configured',
+    twitter_x: 'auth_required'
+  })
+
   // Pipeline debug states
   const [pipelineLoading, setPipelineLoading] = useState(false)
   const [pipelineResult, setPipelineResult] = useState<any>(null)
@@ -49,6 +56,10 @@ export default function SettingsPage() {
         setExpiresAt(linkedin?.expires_at || null)
         setLastVerified(linkedin?.last_verified_at || null)
         setScopes(Array.isArray(linkedin?.granted_scopes) ? linkedin.granted_scopes : [])
+
+        if (automation?.research_sources_status) {
+          setResearchSourcesStatus(automation.research_sources_status)
+        }
 
         setHealth({
           supabase: 'HEALTHY',
@@ -279,6 +290,37 @@ export default function SettingsPage() {
                 <div className="stat-card" style={{ padding: '0.75rem' }}>
                   <p className="stat-label">n8n Engine</p>
                   <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent)' }}>⚙️ {health.n8n}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Research Sources Status */}
+            <div className="card" style={{ border: '1px solid var(--border)' }}>
+              <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '1rem' }}>Advanced Research Sources</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
+                <div className="stat-card" style={{ padding: '0.75rem' }}>
+                  <p className="stat-label">RSS Feeds</p>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--success)', marginTop: '0.25rem' }}>
+                    {String(researchSourcesStatus.rss || 'configured').toUpperCase()}
+                  </p>
+                </div>
+                <div className="stat-card" style={{ padding: '0.75rem' }}>
+                  <p className="stat-label">Reddit</p>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: researchSourcesStatus.reddit === 'active' ? 'var(--success)' : 'var(--accent)', marginTop: '0.25rem' }}>
+                    {String(researchSourcesStatus.reddit || 'configured').toUpperCase()}
+                  </p>
+                </div>
+                <div className="stat-card" style={{ padding: '0.75rem' }}>
+                  <p className="stat-label">LinkedIn Public</p>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--success)', marginTop: '0.25rem' }}>
+                    {String(researchSourcesStatus.linkedin_public || 'configured').toUpperCase()}
+                  </p>
+                </div>
+                <div className="stat-card" style={{ padding: '0.75rem' }}>
+                  <p className="stat-label">Twitter / X</p>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--danger)', marginTop: '0.25rem' }}>
+                    {String(researchSourcesStatus.twitter_x || 'auth_required').toUpperCase()}
+                  </p>
                 </div>
               </div>
             </div>
