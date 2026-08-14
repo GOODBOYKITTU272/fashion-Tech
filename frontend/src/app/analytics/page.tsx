@@ -5,8 +5,8 @@ import { supabase } from '@/lib/supabase'
 
 type MetricSummary = {
   total_followers: number
-  usa_followers: number
-  uk_followers: number
+  usa_followers: number | null
+  uk_followers: number | null
   growth: number
   impressions: number
   reactions: number
@@ -19,8 +19,8 @@ export default function AnalyticsPage() {
   const [syncing, setSyncing] = useState(false)
   const [stats, setStats] = useState<MetricSummary>({
     total_followers: 0,
-    usa_followers: 0,
-    uk_followers: 0,
+    usa_followers: null,
+    uk_followers: null,
     growth: 0,
     impressions: 0,
     reactions: 0,
@@ -61,8 +61,8 @@ export default function AnalyticsPage() {
 
         setStats({
           total_followers: latest.followers_total || 0,
-          usa_followers: latest.usa_followers || 0,
-          uk_followers: latest.uk_followers || 0,
+          usa_followers: latest.usa_followers !== undefined && latest.usa_followers !== null ? latest.usa_followers : null,
+          uk_followers: latest.uk_followers !== undefined && latest.uk_followers !== null ? latest.uk_followers : null,
           growth: 0, // Calculated compared to previous snapshots
           impressions: totalImpressions,
           reactions: totalReactions,
@@ -142,8 +142,8 @@ export default function AnalyticsPage() {
               .insert({
                 published_post_id: postId,
                 followers_total: totalFollowers,
-                usa_followers: Number(row['USA Followers'] || row['usa_followers'] || 0),
-                uk_followers: Number(row['UK Followers'] || row['uk_followers'] || 0),
+                usa_followers: (row['USA Followers'] !== undefined && row['USA Followers'] !== '') ? Number(row['USA Followers']) : (row['usa_followers'] !== undefined && row['usa_followers'] !== '') ? Number(row['usa_followers']) : null,
+                uk_followers: (row['UK Followers'] !== undefined && row['UK Followers'] !== '') ? Number(row['UK Followers']) : (row['uk_followers'] !== undefined && row['uk_followers'] !== '') ? Number(row['uk_followers']) : null,
                 impressions,
                 reactions,
                 comments,
@@ -186,9 +186,13 @@ export default function AnalyticsPage() {
     return result
   }
 
-  const targetQualifiedPct = stats.total_followers > 0 
-    ? Math.round(((stats.usa_followers + stats.uk_followers) / stats.total_followers) * 100)
+  const targetQualifiedPct = stats.total_followers > 0 && stats.usa_followers !== null && stats.uk_followers !== null
+    ? Math.round((((stats.usa_followers || 0) + (stats.uk_followers || 0)) / stats.total_followers) * 100)
     : 0
+
+  const combinedFollowers = stats.usa_followers !== null && stats.uk_followers !== null
+    ? (stats.usa_followers || 0) + (stats.uk_followers || 0)
+    : null
 
   return (
     <div className="page fade-up">
@@ -212,7 +216,7 @@ export default function AnalyticsPage() {
       <div className="card" style={{ border: '1px solid var(--border)', background: 'var(--bg-surface)', padding: '2rem', marginBottom: '2.5rem' }}>
         <p className="section-label" style={{ color: 'var(--accent)', marginBottom: '0.5rem' }}>🏆 North-Star KPI Target</p>
         <p style={{ fontFamily: 'var(--font-display)', fontSize: '3.6rem', fontWeight: 400, color: 'var(--text-primary)', lineHeight: 1 }}>
-          {stats.usa_followers + stats.uk_followers > 0 ? `${(stats.usa_followers + stats.uk_followers).toLocaleString()}` : '—'}
+          {combinedFollowers !== null ? `${combinedFollowers.toLocaleString()}` : '—'}
         </p>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.75rem' }}>
           Combined qualified target market followers from USA and UK ({targetQualifiedPct > 0 ? `${targetQualifiedPct}%` : '—'} of total audience)
@@ -223,8 +227,8 @@ export default function AnalyticsPage() {
       <div className="stat-grid" style={{ marginBottom: '2.5rem' }}>
         {[
           { label: 'Total Followers', value: stats.total_followers > 0 ? stats.total_followers.toLocaleString() : '—', desc: 'Total network size' },
-          { label: 'USA Followers', value: stats.usa_followers > 0 ? stats.usa_followers.toLocaleString() : '—', desc: 'Primary target region' },
-          { label: 'UK Followers', value: stats.uk_followers > 0 ? stats.uk_followers.toLocaleString() : '—', desc: 'Secondary target region' },
+          { label: 'USA Followers', value: stats.usa_followers !== null ? stats.usa_followers.toLocaleString() : '—', desc: 'Primary target region' },
+          { label: 'UK Followers', value: stats.uk_followers !== null ? stats.uk_followers.toLocaleString() : '—', desc: 'Secondary target region' },
           { label: 'Total Impressions', value: stats.impressions > 0 ? stats.impressions.toLocaleString() : '—', desc: 'Total content impressions' },
           { label: 'Total Engagement', value: stats.reactions + stats.comments + stats.reposts > 0 ? (stats.reactions + stats.comments + stats.reposts).toLocaleString() : '—', desc: 'Reactions, comments & reposts' }
         ].map(item => (

@@ -68,7 +68,7 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
     let mediaUrl = null
     let pdfUrl = null
     let confidenceScore = 80
-    let qualityStatus = calItem.quality_gate_status || 'passed'
+    let qualityStatus = calItem.quality_gate_status || 'failed'
 
     if (calItem.draft_id) {
       const { data: draft } = await admin
@@ -83,7 +83,7 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
         mediaUrl = draft.image_url || null
         pdfUrl = draft.pdf_url || null
         confidenceScore = draft.confidence_score ?? confidenceScore
-        qualityStatus = draft.quality_gate_status || qualityStatus
+        qualityStatus = draft.quality_gate_status || qualityStatus || 'failed'
       }
     } else if (calItem.content_idea_id) {
       const { data: idea } = await admin
@@ -123,6 +123,52 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
         reason_code: 'DUPLICATE_ATTEMPT_BLOCKED',
         idempotency_key: idempotencyKey,
         reasons: ['A successful publishing attempt already exists for this post and date slot.']
+      }
+    }
+
+    // Check for schedule conflicts on the same date and time slot
+    const { data: conflicts } = await admin
+      .from('content_calendar')
+      .select('id, source, status, external_status')
+      .eq('planned_date', calItem.planned_date)
+      .eq('planned_time', calItem.planned_time)
+      .neq('id', calendarId)
+      .in('status', ['scheduled', 'published'])
+
+    if (conflicts && conflicts.length > 0) {
+      const externalConflict = conflicts.find(c => c.source === 'linkedin_native')
+      const conflictType = externalConflict ? 'SCHEDULE_CONFLICT_EXTERNAL' : 'SCHEDULE_CONFLICT_INTERNAL'
+      const conflictMsg = externalConflict
+        ? 'Publishing blocked: A schedule conflict exists with an external native LinkedIn post scheduled at the same time.'
+        : 'Publishing blocked: Another internal post is already scheduled or published in this time slot.'
+
+      await logAutomationEvent({
+        userId,
+        eventType: 'PUBLISH_GATE_BLOCKED',
+        severity: 'warning',
+        message: conflictMsg
+      })
+
+      await admin.from('publishing_attempts').insert({
+        user_id: userId,
+        calendar_id: calendarId,
+        attempt_number: 1,
+        request_type: 'text',
+        status: 'BLOCKED',
+        idempotency_key: idempotencyKey,
+        dry_run: dryRun,
+        error_code: conflictType,
+        failure_reason: conflictMsg,
+        started_at: new Date().toISOString(),
+        completed_at: new Date().toISOString()
+      })
+
+      return {
+        success: false,
+        status: 'BLOCKED',
+        reason_code: conflictType,
+        reasons: [conflictMsg],
+        idempotency_key: idempotencyKey
       }
     }
 

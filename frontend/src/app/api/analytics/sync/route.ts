@@ -1,19 +1,27 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { verifyServerAuthorization } from '@/lib/auth-guard'
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
+    // 1. Authenticate Request
+    const auth = await verifyServerAuthorization(req)
+    if (!auth.authorized || !auth.userId) {
+      return auth.response || NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const apiKey = process.env.ZERNIO_API_KEY
     if (!apiKey || apiKey.startsWith('your-')) {
       return NextResponse.json({
         success: false,
+        zernio_analytics_supported: 'NO',
         error: 'Zernio API key is not configured.'
-      }, { status: 400 })
+      }, { status: 200 }) // Fail gracefully with status 200 as requested
     }
 
     const admin = getSupabaseAdmin()
 
-    // 1. Fetch successful publishing attempts with Zernio post IDs
+    // 2. Fetch successful publishing attempts with Zernio post IDs
     const { data: attempts, error: attError } = await admin
       .from('publishing_attempts')
       .select('id, calendar_id, published_post_id, response_metadata')
@@ -21,7 +29,7 @@ export async function POST() {
 
     if (attError) throw attError
 
-    // 2. Fetch CSV-imported published posts with Zernio post IDs
+    // 3. Fetch CSV-imported published posts with Zernio post IDs
     const { data: csvPosts, error: csvError } = await admin
       .from('published_posts')
       .select('id, calendar_id, native_post_id, linkedin_post_url')
@@ -96,7 +104,7 @@ export async function POST() {
     let syncCount = 0
     const errors: string[] = []
 
-    // 3. For each unique Zernio post, fetch metrics from Zernio API and update DB
+    // 4. For each unique Zernio post, fetch metrics from Zernio API and update DB
     for (const post of postsToSync) {
       try {
         const zernioRes = await fetch(`https://api.zernio.com/v1/analytics/${post.zernioPostId}`, {
@@ -113,10 +121,17 @@ export async function POST() {
         const data = await zernioRes.json()
         const metrics = data.metrics || data || {}
 
-        const impressions = Number(metrics.impressions || metrics.views || 0)
-        const reactions = Number(metrics.reactions || metrics.likes || 0)
-        const comments = Number(metrics.comments || 0)
-        const reposts = Number(metrics.reposts || metrics.shares || 0)
+        // Ensure we ONLY capture fields that actually exist in the Zernio response, avoiding inventing zeros
+        const impressions = metrics.impressions !== undefined || metrics.views !== undefined
+          ? Number(metrics.impressions !== undefined ? metrics.impressions : metrics.views)
+          : null
+        const reactions = metrics.reactions !== undefined || metrics.likes !== undefined
+          ? Number(metrics.reactions !== undefined ? metrics.reactions : metrics.likes)
+          : null
+        const comments = metrics.comments !== undefined ? Number(metrics.comments) : null
+        const reposts = metrics.reposts !== undefined || metrics.shares !== undefined
+          ? Number(metrics.reposts !== undefined ? metrics.reposts : metrics.shares)
+          : null
 
         // Insert fresh snapshot into post_metrics
         await admin
@@ -138,6 +153,7 @@ export async function POST() {
 
     return NextResponse.json({
       success: true,
+      zernio_analytics_supported: 'YES',
       sync_count: syncCount,
       errors: errors.length > 0 ? errors : undefined
     })

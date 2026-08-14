@@ -21,7 +21,7 @@ export async function canPublishScheduledPost(params: PublishingEligibilityParam
   const {
     userId,
     contentStatus = 'scheduled',
-    qualityGateStatus = 'passed',
+    qualityGateStatus = 'failed',
     confidenceScore = 75,
     personalContextStatus = 'passed',
     dryRun = false
