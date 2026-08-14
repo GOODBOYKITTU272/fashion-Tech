@@ -77,7 +77,14 @@ export default function AnalyticsPage() {
   const handleSyncMetrics = async () => {
     setSyncing(true)
     try {
-      const res = await fetch('/api/analytics/sync', { method: 'POST' })
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      const res = await fetch('/api/analytics/sync', { 
+        method: 'POST',
+        headers: {
+          'Authorization': session?.access_token ? `Bearer ${session.access_token}` : ''
+        }
+      })
       const data = await res.json()
       if (data.success) {
         alert(`Successfully synchronized ${data.sync_count} post metrics from Zernio!`)
