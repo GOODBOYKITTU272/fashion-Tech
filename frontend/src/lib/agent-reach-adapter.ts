@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from './supabase-admin'
 import crypto from 'crypto'
+import { evaluateResearchRelevance } from './relevance-gate'
 
 export interface CanonicalResearchSignal {
   source_name: string
@@ -11,6 +12,10 @@ export interface CanonicalResearchSignal {
   category: string
   raw_text: string | null
   source_type: 'rss' | 'web_search' | 'web_scrape'
+  relevance_status?: 'accepted' | 'rejected' | 'failed'
+  relevance_score?: number
+  topic_family?: string
+  relevance_reason?: string
 }
 
 export interface IngestionResult {
@@ -21,18 +26,15 @@ export interface IngestionResult {
   agent_reach_production_status: 'NOT_DEPLOYED'
   signals_discovered: number
   signals_inserted: number
+  signals_accepted: number
+  signals_rejected: number
   signals_deduplicated: number
   signals: CanonicalResearchSignal[]
   errors: string[]
 }
 
-// Initial Safe RSS Feeds for Target Research Topics (Fashion Tech, Indian Craftsmanship, Textile Innovation, Sustainable Fashion)
+// Production Feeds for Fashion Tech, Indian Textiles, Craftsmanship, and Sustainable Fashion
 const SAFE_FASHION_RSS_FEEDS = [
-  {
-    name: 'Vogue Business',
-    url: 'https://www.voguebusiness.com/feed',
-    category: 'Fashion Technology & Sustainability'
-  },
   {
     name: 'FashionUnited Global',
     url: 'https://fashionunited.com/rss-news',
@@ -42,15 +44,19 @@ const SAFE_FASHION_RSS_FEEDS = [
     name: 'Textile Today Global',
     url: 'https://www.textiletoday.com.bd/feed/',
     category: 'Textile Innovation & Craftsmanship'
+  },
+  {
+    name: 'Fibre2Fashion News',
+    url: 'https://www.fibre2fashion.com/rss/news/fashion-news.xml',
+    category: 'Textile & Apparel Industry'
+  },
+  {
+    name: 'Apparel Resources Tech',
+    url: 'https://apparelresources.com/feed/',
+    category: 'Fashion Technology & Supply Chain'
   }
 ]
 
-/**
- * parsePublishedAt
- * Safely parses raw publication date strings.
- * Returns ISO string if valid, or NULL if missing/invalid.
- * NEVER substitutes current discovery time for missing publication dates.
- */
 export function parsePublishedAt(rawDate?: string | null): string | null {
   if (!rawDate || typeof rawDate !== 'string') return null
   const cleaned = rawDate.replace(/<[^>]+>/g, '').trim()
@@ -65,35 +71,28 @@ export function parsePublishedAt(rawDate?: string | null): string | null {
   }
 }
 
-/**
- * generateFingerprint
- * Computes stable hash based on normalized URL + title
- */
 export function generateFingerprint(sourceUrl: string, title: string): string {
   const normalizedUrl = sourceUrl.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')
   const normalizedTitle = title.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
   return crypto.createHash('sha256').update(`${normalizedUrl}:${normalizedTitle}`).digest('hex')
 }
 
-/**
- * fetchJinaWebReader
- * Uses Jina Reader safe zero-config HTTP adapter to extract markdown content from any public webpage without cookies.
- */
 export async function fetchJinaWebReader(targetUrl: string): Promise<{ title: string; content: string } | null> {
   try {
     const jinaUrl = `https://r.jina.ai/${encodeURIComponent(targetUrl)}`
     const res = await fetch(jinaUrl, {
       headers: {
-        'Accept': 'text/plain',
-        'User-Agent': 'SafeHTTP-Reader/1.5'
+        'Accept': 'text/plain'
       }
     })
 
     if (!res.ok) return null
 
     const text = await res.text()
+    if (!text || text.length < 50 || text.includes('AbuseAlleviationError')) return null
+
     const lines = text.split('\n').filter(l => l.trim().length > 0)
-    const title = lines[0]?.replace(/^Title:\s*/i, '').trim() || 'Scraped Web Signal'
+    const title = lines[0]?.replace(/^Title:\s*/i, '').trim() || 'Scraped Article'
 
     return {
       title,
@@ -107,14 +106,16 @@ export async function fetchJinaWebReader(targetUrl: string): Promise<{ title: st
 
 /**
  * runAgentReachW1Ingestion
- * Master W1 ingestion workflow using safe HTTP adapters (RSS & Jina Web Reader).
- * Normalizes signals, strictly parses publication dates (without fabrication), deduplicates by URL and fingerprint, and persists into public.research_signals.
+ * Master W1 ingestion workflow using safe HTTP RSS connectors & Jina Web Reader enrichment.
+ * Evaluates fashion relevance gate before DB insertion.
  */
 export async function runAgentReachW1Ingestion(userId: string): Promise<IngestionResult> {
   const resultSignals: CanonicalResearchSignal[] = []
   const errors: string[] = []
   let discoveredCount = 0
   let insertedCount = 0
+  let acceptedCount = 0
+  let rejectedCount = 0
   let deduplicatedCount = 0
 
   if (!userId) {
@@ -126,6 +127,8 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
       agent_reach_production_status: 'NOT_DEPLOYED',
       signals_discovered: 0,
       signals_inserted: 0,
+      signals_accepted: 0,
+      signals_rejected: 0,
       signals_deduplicated: 0,
       signals: [],
       errors: ['User ID is required for research signal ingestion.']
@@ -134,20 +137,17 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
 
   const admin = getSupabaseAdmin()
 
-  // 1. Ingest from Safe RSS Feeds
   for (const feed of SAFE_FASHION_RSS_FEEDS) {
     try {
-      const res = await fetch(feed.url, { headers: { 'User-Agent': 'SafeHTTP-RSS/1.5' } })
+      const res = await fetch(feed.url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } })
       if (!res.ok) {
         errors.push(`Failed to fetch RSS feed ${feed.name}: HTTP ${res.status}`)
         continue
       }
 
       const xmlText = await res.text()
-
-      // Basic XML item parsing for RSS items
       const itemMatches = xmlText.match(/<item>([\s\S]*?)<\/item>/gi) || []
-      const itemsToProcess = itemMatches.slice(0, 3) // Process top 3 items per feed
+      const itemsToProcess = itemMatches.slice(0, 4)
 
       for (const itemXml of itemsToProcess) {
         const titleMatch = itemXml.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i)
@@ -167,7 +167,7 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
         const discoveredAt = new Date().toISOString()
         const fingerprint = generateFingerprint(link, title)
 
-        // Deduplication Check in public.research_signals using URL and Fingerprint
+        // Deduplication Check
         const { data: existing } = await admin
           .from('research_signals')
           .select('id')
@@ -179,6 +179,22 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           continue
         }
 
+        // Attempt Jina enrichment if available
+        let enrichedContent = summary
+        const jinaData = await fetchJinaWebReader(link)
+        if (jinaData && jinaData.content) {
+          enrichedContent = `${summary || ''}\n\n${jinaData.content}`.trim()
+        }
+
+        // 4. Run Fashion Relevance Gate Check
+        const relevanceResult = await evaluateResearchRelevance(title, summary || '', enrichedContent || '')
+
+        if (relevanceResult.eligible) {
+          acceptedCount++
+        } else {
+          rejectedCount++
+        }
+
         const signal: CanonicalResearchSignal = {
           source_name: feed.name,
           source_url: link,
@@ -187,11 +203,16 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           published_at: publishedAt,
           discovered_at: discoveredAt,
           category: feed.category,
-          raw_text: summary,
-          source_type: 'rss'
+          raw_text: enrichedContent,
+          source_type: 'rss',
+          relevance_status: relevanceResult.relevance_status,
+          relevance_score: relevanceResult.relevance_score,
+          topic_family: relevanceResult.topic_family,
+          relevance_reason: relevanceResult.relevance_reason
         }
 
-        // Insert persistent research signal into public.research_signals
+        // Insert persistent signal into public.research_signals
+        // If rejected by relevance gate, set processed = true so it never enters W2
         const { error: insertErr } = await admin.from('research_signals').insert({
           source_name: signal.source_name,
           source_type: signal.source_type,
@@ -203,11 +224,15 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           published_at: signal.published_at,
           captured_at: signal.discovered_at,
           fingerprint,
-          processed: false
+          relevance_status: relevanceResult.relevance_status,
+          relevance_score: relevanceResult.relevance_score,
+          topic_family: relevanceResult.topic_family,
+          relevance_reason: relevanceResult.relevance_reason,
+          relevance_checked_at: new Date().toISOString(),
+          processed: !relevanceResult.eligible
         })
 
         if (insertErr) {
-          // If unique constraint collision occurs on fingerprint
           if (insertErr.code === '23505') {
             deduplicatedCount++
           } else {
@@ -232,6 +257,8 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
     agent_reach_production_status: 'NOT_DEPLOYED',
     signals_discovered: discoveredCount,
     signals_inserted: insertedCount,
+    signals_accepted: acceptedCount,
+    signals_rejected: rejectedCount,
     signals_deduplicated: deduplicatedCount,
     signals: resultSignals,
     errors
