@@ -1,16 +1,16 @@
 # PRD — Pranavi Fashion Content Engine
-**Version:** 1.1 (Markdown canonical version)
-**Status:** Active — source of truth for all coding agents
+**Version:** 2.0 (Autonomous LinkedIn Official API Architecture)
+**Status:** Active — Canonical Source of Truth
 
 ---
 
 ## 1. Executive Summary
 
-The Pranavi Fashion Content Engine is a **private, single-user** system designed to help Pranavi build a credible LinkedIn audience around fashion design, fashion technology, Indian craftsmanship, contemporary design, and her transition from Computer Science into Fashion Design.
+The Pranavi Fashion Content Engine is an **autonomous, single-user** system designed for maximum automation using the **OFFICIAL LinkedIn API**. It targets qualified follower growth from the USA and UK around Code × Craft × Contemporary Design.
 
-The system continuously researches the fashion ecosystem, surfaces the strongest opportunities, creates first drafts and carousel structures, collects Pranavi's real experiences, routes content for approval, supports native LinkedIn scheduling, ingests performance data, and learns from every approval, rejection, edit and result.
+V1 operates in **AUTO MODE by default**. Daily manual work is eliminated. The engine automatically researches daily signals, deduplicates, scores opportunities, generates content and carousel briefs, runs automated quality/fact gates, schedules posts, publishes directly through approved official LinkedIn APIs (`w_member_social`), ingests performance metrics (`r_member_postAnalytics`), and runs weekly AI optimization loops.
 
-V1 is **intentionally not a fully autonomous social-media bot**. Research, ranking and draft preparation are automated; personal experience, final judgment, relationship-building, comments and publishing remain human-controlled.
+Human interaction is **exception-based only** (e.g. paused publishing when fact checks flag missing personal context, low confidence scores, or expired OAuth tokens).
 
 ---
 
@@ -18,12 +18,12 @@ V1 is **intentionally not a fully autonomous social-media bot**. Research, ranki
 
 | Constraint | Rule |
 |-----------|------|
-| **Cost** | Zero mandatory paid SaaS subscriptions in V1. Every required component must be free, open-source, or self-hostable. |
-| **User** | Pranavi only. Single-user. No multi-tenant architecture. |
-| **Platform** | LinkedIn primary. Instagram may come later. No X/Twitter in V1. |
-| **Publishing** | Manual only. No automated LinkedIn posting, commenting, or connecting. |
-| **AI** | OpenAI is optional — usable with credits, but never required. Must use provider abstraction. |
-| **Authenticity** | System must never fabricate Pranavi's personal experiences. |
+| **Automation Target** | V1 is designed for autonomous LinkedIn content operations via official LinkedIn APIs (`w_member_social`, `r_member_postAnalytics`). Daily manual work is NOT required in Auto Mode. |
+| **Official APIs Only** | Use ONLY official LinkedIn OAuth & approved APIs. NO Selenium, Playwright, cookie stealing, browser scraping, or unofficial bots. |
+| **Cost Constraint** | Zero mandatory paid SaaS subscriptions (no Buffer, Hootsuite, Zapier, Make). Infrastructure remains free/self-hosted. OpenAI API is the approved paid exception. |
+| **User & Scope** | Single-user (Pranavi only). LinkedIn target primary. |
+| **Authenticity Rule** | Never fabricate personal experiences. Automation uses approved Brand Memory / Personal Experience Memory. If new context is needed, engine automatically selects another publishable topic or flags `NEEDS REVIEW`. |
+| **Safety Guardrails** | Global `AUTO MODE` [ON/OFF] toggle and emergency `PAUSE ALL PUBLISHING`. System auto-pauses on fact-check failure, expired tokens, or unverified claims. |
 
 ---
 
@@ -31,130 +31,54 @@ V1 is **intentionally not a fully autonomous social-media bot**. Research, ranki
 
 | Goal | Definition of Success |
 |------|----------------------|
-| Build qualified visibility | Grow followers and engagement from USA + UK, not just total follower count |
-| Maintain a consistent content engine | Plan and execute 4 high-quality LinkedIn posts per week |
-| Stay timely | Research fashion, craft, retail, sustainability and fashion-tech signals every day |
-| Build a recognisable point of view | Strengthen the Code × Craft × Contemporary Design positioning |
-| Protect authenticity | Require Pranavi's input for personal stories and major opinions |
-| Learn from evidence | Improve topics, hooks, formats, timing and voice based on real performance |
-| Prepare for future brand launch | Build an audience and relationship base before products exist |
+| Zero-Friction Cadence | Automatically plan and publish 4 LinkedIn posts per week through official APIs |
+| High Relevance | Daily automated research across 10 fashion/tech categories, ranking top 5 opportunities |
+| Autonomous Operations | Auto Mode ON by default — quality gates, scheduling, publishing, and analytics run automatically |
+| Authenticity Protection | System pulls from stored Personal Memory or picks alternative topics automatically without inventing stories |
+| Continuous Optimization | Weekly AI analysis of post analytics to refine hook strategies, pillars, and posting times |
 
 ---
 
 ## 4. Non-Goals for V1
 
-- No automated mass LinkedIn connection requests
-- No automated commenting or impersonated replies
-- No browser automation for LinkedIn login/posting
-- No multi-user creator SaaS architecture
-- No Instagram or X publishing in V1
-- No fully autonomous posting without approval
-- No paid workflow dependency
+- No unofficial browser automation or scraping-based login to LinkedIn.
+- No paid publishing intermediaries (Buffer, Hootsuite, Zapier).
+- No multi-tenant SaaS architecture.
+- No fabrication of unverified personal experiences.
 
 ---
 
-## 5. Audience and Positioning
+## 5. LinkedIn Official Integration Architecture
 
-| Dimension | V1 Definition |
-|-----------|--------------|
-| Geography | USA + UK |
-| Primary audience | Fashion-conscious consumers, fashion professionals, designers, fashion-tech people, textile/craft researchers, boutique/brand founders, stylists, buyers and collaborators |
-| Brand territory | Fashion technology × Indian craftsmanship × contemporary global fashion |
-| Voice | Curious, intelligent, grounded, learning in public; never pretending to be an expert where she is still learning |
+### Publishing (`w_member_social`)
+- Automatic text, image, and document/carousel post publishing via official API.
+- Native retry logic and error logging in Supabase `publishing_attempts`.
+- Storing returned LinkedIn post URNs and permalinks in `published_posts`.
 
----
+### Analytics (`r_member_postAnalytics`, `r_member_profileAnalytics`)
+- Automated ingestion of impressions, reactions, comments, reshares, profile views, and follower growth via n8n cron.
+- Storage in `post_metrics` for weekly AI optimization.
 
-## 6. Tech Stack
-
-| Layer | Tool | Why |
-|-------|------|-----|
-| Frontend | Next.js + TypeScript | Responsive PWA, Vercel-deployable, self-hostable |
-| Hosting | Vercel Free tier | Free hobby plan sufficient for V1 |
-| Database | Supabase PostgreSQL | Free tier 500MB, standard PostgreSQL, self-hostable |
-| Auth | Supabase Auth | Built into free tier |
-| Orchestration | Self-hosted n8n Community Edition | Free forever when self-hosted |
-| Research | Agent Reach (connector abstraction) | Open source |
-| AI | Provider abstraction (OpenAI optional) | Never hardcoded to one provider |
-| Notifications | Telegram (optional) | Free bot API |
-| Publishing | Manual / LinkedIn native scheduler | No automation risk |
+### Status Indicator
+- Until API access is granted by LinkedIn Developer portal, system labels interface: **`LINKEDIN AUTOMATION — WAITING FOR API ACCESS`**.
 
 ---
 
-## 7. Weekly Content Cadence
+## 6. Weekly Cadence & Schedule
 
-**4 posts per week:**
+4 posts/week managed automatically by n8n:
+- **Educational:** 2 posts (Monday & Thursday)
+- **Storytelling:** 1 post (Wednesday)
+- **Soft Selling:** 1 post (Saturday)
 
-| Pillar | Count | Example Day |
-|--------|-------|-------------|
-| Educational | 2 | Monday + Thursday |
-| Storytelling | 1 | Wednesday |
-| Soft Selling | 1 | Saturday |
-
----
-
-## 8. Daily Research Loop
-
-Research runs **every day** across:
-- Fashion industry
-- Fashion technology
-- Indian craftsmanship and textiles
-- Retail trends
-- Sustainability
-- Consumer behavior
-- Designer and brand developments
-- USA fashion market
-- UK fashion market
-
-System may gather many signals internally. Pranavi sees a **maximum of 5 ranked opportunities** per day.
+Posting times are dynamically optimized over time based on analytics feedback.
 
 ---
 
-## 9. Primary KPI — 90 Days
+## 7. Control Room Overview
 
-**North-star:** Qualified follower growth from USA + UK
-
-| Metric | Priority |
-|--------|----------|
-| USA + UK follower growth | North-star |
-| USA + UK share of follower base | Primary |
-| Relevant profile views | Secondary |
-| Meaningful comments | Secondary |
-| Connection acceptance from target network | Secondary |
-| DMs / collaboration signals | Secondary |
-| Impressions | Diagnostic only |
-| Reactions | Diagnostic only |
-
----
-
-## 10. Control Room Screens (V1)
-
-1. **Today / Research Inbox** — top 5 ranked topics, score breakdown
-2. **Post Editor** — hooks, draft, personal input, carousel outline, approve/edit/reject
-3. **Content Calendar** — 7-day view, 4-post mix, status management
-4. **Analytics** — USA/UK growth, post performance, weekly insights
-5. **Settings** — sources, brand memory, watchlist
-
----
-
-## 11. Event Overrides
-
-Real-world events (fashion shows, workshops, visits, college assignments, studio work) can override scheduled content. The system may recommend an override. Pranavi must approve it. The system never fabricates a personal story.
-
----
-
-## 12. Phase Roadmap
-
-| Phase | Scope |
-|-------|-------|
-| Phase 1 — Core MVP | Research, top 5, scoring, drafts, Next.js approval, calendar, manual publishing, analytics import, weekly review |
-| Phase 1.5 — Visual System | Three branded carousel templates, stronger media workflow |
-| Phase 2 — Network Intelligence | 5 recommended target connections/day, relationship memory |
-| Phase 3 — Additional Channels | Instagram activation |
-| Phase 4 — Deeper Automation | Improve analytics ingestion, source connectors, model routing |
-
----
-
-## 13. Final Principle
-
-> Automate research, organization, scoring and first drafts.
-> Keep identity, judgment, relationships and final publishing human.
+1. **Today / Inbox:** Auto Mode toggle, health status, next scheduled post, daily research signals.
+2. **Post Editor:** Optional override & review screen showing AI/fact check status.
+3. **Calendar:** Displays auto-scheduled, published, failed, and `NEEDS REVIEW` posts.
+4. **Analytics:** Live dashboard populated automatically via LinkedIn Analytics API.
+5. **Settings:** Automation controls (Auto Mode ON/OFF, Pause Publishing), OAuth Connection Manager (Token status, scope checker, reconnect button), and Brand Memory.

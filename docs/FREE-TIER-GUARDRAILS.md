@@ -101,12 +101,13 @@
 
 | | |
 |--|--|
-| **Why we use it** | Target publishing platform |
-| **Open source?** | N/A |
-| **Free tier** | ✅ Standard personal account is free |
-| **What triggers charges** | LinkedIn Premium, Sales Navigator |
-| **How to avoid charges** | Use standard account. Publish manually via native scheduler. Never use paid API tiers. |
-| **Automation rule** | ❌ **NEVER automate LinkedIn login, posting, connecting, or messaging** |
+| **Why we use it** | Primary target publishing & audience platform |
+| **Open source?** | N/A — official LinkedIn Developer Platform |
+| **Free tier** | ✅ Standard Member OAuth API access & analytics permissions are free |
+| **What triggers charges** | Third-party paid SaaS intermediaries (Buffer, Hootsuite, Sprout Social). **DO NOT USE THESE.** |
+| **How to avoid charges** | Connect directly using official LinkedIn OAuth 2.0 (`w_member_social`, `r_member_postAnalytics`). Do not introduce paid publishing tools. |
+| **Automation rule** | ✅ **Use ONLY official LinkedIn APIs.** NO unofficial browser automation, scrapers, cookie stealing, or bots. |
+
 
 ---
 

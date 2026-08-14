@@ -1,117 +1,45 @@
-# App Flow — Pranavi Fashion Content Engine V1
+# App Flow — Autonomous LinkedIn Content Engine V2
 
 ---
 
-## Daily Loop (Core Flow)
+## Autonomous Daily Flow (NO Manual Work Required)
 
 ```
-[Night / Early Morning]
-    n8n W1 runs → Agent Reach scrapes sources → raw signals → Supabase research_signals
-    n8n W2 runs → deduplication + AI scoring → top 5 ranked → topic_scores
+[Night / 2:00 AM]
+    n8n W1 (Daily Research) → Agent Reach → Supabase research_signals
 
-[Morning — Pranavi opens app]
-    → Today / Research Inbox
-    → Sees top 5 opportunities with scores
-    → Selects one
+[3:00 AM]
+    n8n W2 (Deduplicate & Score) → AI Provider → Supabase topic_scores
 
-    → Clicks "Create Draft"
-    → n8n W3 webhook fires → AI generates hooks, body, carousel outline
-    → Draft saved to Supabase drafts + draft_versions (AI version)
+[4:00 AM]
+    n8n W3 (Draft Generator) → AI Provider → Copy, Hooks & Carousel Outline → Supabase drafts
 
-    → Post Editor opens
-    → Pranavi reads draft, picks a hook
-    → Adds personal input (text note / photo / experience)
-    → Edits body if needed
-    → Clicks APPROVE or REJECT (with reason)
+[5:00 AM]
+    n8n W4 (Automated Quality Gate)
+    ├── Checks: Fact Check, Brand Voice, Duplicate Check, Personal Context
+    ├── IF PASSED → Mark 'quality_passed'
+    └── IF FAILED / UNVERIFIED STORY → Mark 'NEEDS REVIEW' or pick alternative topic
 
-    → If APPROVED → content_ideas status = 'approved' → appears in calendar
-    → If REJECTED → rejection reason stored in approvals table → learning_memory updated
+[Scheduled Slot Time]
+    n8n W6 (LinkedIn Publisher)
+    ├── Check: AUTO MODE == ON && PAUSE_ALL == FALSE && Token Valid
+    ├── Call Official LinkedIn API (w_member_social)
+    ├── Save LinkedIn Post URN + Permalink to Supabase
+    └── Update status to 'published' (or 'failed' on error)
 
-[Later]
-    → Pranavi goes to Content Calendar
-    → Sees the week's 4-post plan
-    → Opens LinkedIn native scheduler
-    → Pastes copy + uploads carousel
-    → Marks post as "Scheduled" in the app
-    → After publishing → marks as "Published" + adds LinkedIn URL
+[Every Evening]
+    n8n W7 (Analytics Collector) → LinkedIn Official Analytics API → Supabase post_metrics
 ```
 
 ---
 
-## Sunday Weekly Planning Flow
+## Human Exception Flow (Optional / Manual Overrides Only)
 
 ```
-[Every Sunday — automated]
-    n8n W5 runs
-    → Checks content_calendar for next 7 days
-    → If fewer than 4 posts exist → fills slots with:
-        Monday / Thursday = Educational
-        Wednesday = Storytelling
-        Saturday = Soft Selling
-    → Drafts appear in calendar with status = 'draft'
-
-[Pranavi reviews on Sunday evening]
-    → Opens Calendar screen
-    → Reviews the week's suggested plan
-    → Can move, replace, or override slots with real events
-    → Approves the plan
-```
-
----
-
-## Post Lifecycle States
-
-```
-topic scored → content idea created → draft generated → personal input added
-→ [approved | edited | rejected]
-→ approved → calendar slot → [scheduled → published]
-                            → [skipped]
-```
-
----
-
-## Analytics Entry Flow
-
-```
-[After publishing]
-    → LinkedIn provides analytics (impressions, reactions, follower data)
-    → Pranavi exports or manually enters data
-    → Analytics screen allows CSV import or manual entry
-    → Data saved to post_metrics linked to published_posts
-
-[Weekly — automated]
-    n8n W7 runs
-    → Analyzes post_metrics from past 7 days
-    → Generates weekly_reports record
-    → Updates learning_memory with evidence-based insights
-    → Pranavi sees report in Analytics screen
-```
-
----
-
-## Screen Navigation
-
-```
-Bottom Nav (Mobile) / Sidebar (Desktop)
-├── Today          → /
-├── Post Editor    → /editor/[id]
-├── Calendar       → /calendar
-├── Analytics      → /analytics
-└── Settings       → /settings
-```
-
----
-
-## Event Override Flow
-
-```
-Pranavi has a real-world event (fashion show, workshop, craft visit)
-    → Opens Calendar
-    → Clicks "Override" on any slot
-    → Enters event description
-    → System suggests content angle based on event
-    → Pranavi approves angle
-    → Draft generated with event context
-    → Standard approval flow continues
-    → Published content is authentic — based on real experience
+Pranavi opens Control Room (Optional)
+├── View Auto Mode Status [ON / OFF]
+├── View LinkedIn OAuth Connection & Expiry Status
+├── Review any items flagged 'NEEDS REVIEW' or 'NEEDS INPUT'
+├── Add new personal experiences to Brand Memory (if desired)
+└── Manually override schedule or pause publishing if needed
 ```

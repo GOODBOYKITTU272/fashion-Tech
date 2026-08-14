@@ -1,180 +1,74 @@
 # TRD — Technical Requirements Document
-**Pranavi Fashion Content Engine — V1**
+**Version:** 2.0 (Autonomous LinkedIn Official API Architecture)
 
 ---
 
-## 1. Architecture Overview
+## 1. System Architecture
 
 ```
 Agent Reach (research connector)
         ↓
-self-hosted n8n Community Edition (orchestration)
+n8n Community Edition (orchestration W1–W9)
         ↓
-AI Provider Abstraction (OpenAI optional / Ollama / free model)
+AI Provider Abstraction (OpenAI / Gemini / Ollama)
         ↓
-Supabase PostgreSQL (database)
+Supabase PostgreSQL (database & state management)
         ↓
-Next.js Control Room (frontend)
+LinkedIn Official API (Publishing: w_member_social | Analytics: r_member_postAnalytics)
         ↓
-Vercel Free Tier (hosting)
-        ↓
-LinkedIn (manual publishing by Pranavi)
+Next.js Control Room (Auto Mode Monitoring, OAuth Settings, Exception Override)
 ```
 
 ---
 
-## 2. Frontend
+## 2. LinkedIn OAuth & Security Architecture
 
-| Requirement | Specification |
-|-------------|--------------|
-| Framework | Next.js 16+ with TypeScript |
-| Router | App Router (`/src/app/`) |
-| Styling | Vanilla CSS — no Tailwind |
-| Design | Dark glassmorphism, responsive |
-| Fonts | Inter + Outfit via Google Fonts |
-| Responsive | iPhone, Android, tablet, desktop |
-| Mobile layout | Stacked cards, bottom nav, large tap targets |
-| Deployment | Vercel Hobby Free tier |
-| Portability | Must run with `next start` on any Node.js host |
-| Secrets | NEVER expose service-role key or AI keys to browser |
-
-### Required Routes
-
-| Route | Screen |
-|-------|--------|
-| `/` | Today / Research Inbox |
-| `/editor/[id]` | Post Editor |
-| `/calendar` | Content Calendar |
-| `/analytics` | Analytics Dashboard |
-| `/settings` | Sources, Brand Memory, Watchlist |
-
-### Environment Variables (frontend only)
-
-```
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-NEXT_PUBLIC_N8N_WEBHOOK_GENERATE_DRAFT=
-```
-
-Only `NEXT_PUBLIC_*` variables reach the browser. All others are server-side only.
+| Requirement | Implementation |
+|-------------|----------------|
+| Authentication | Official OAuth 2.0 Authorization Code Flow |
+| Credentials | `LINKEDIN_CLIENT_ID` (Server-side/Env) and `LINKEDIN_CLIENT_SECRET` (Server-side ONLY) |
+| Scopes | `w_member_social`, `r_member_postAnalytics`, `r_member_profileAnalytics` (or approved equivalents) |
+| Token Storage | Encrypted in `linkedin_connections` table in Supabase |
+| Expiry Tracking | Auto-refresh tracking & re-auth alerts when token expires (< 7 days remaining) |
+| Callback Route | `/api/auth/linkedin/callback` (Next.js server-side handler) |
+| Frontend Display | Settings page shows connection state: Connected / Disconnected, Granted Scopes, Expiry, Reconnect button |
 
 ---
 
-## 3. Database
+## 3. Database Schema Extensions
 
-| Requirement | Specification |
-|-------------|--------------|
-| Engine | PostgreSQL (via Supabase) |
-| Auth | Supabase Auth — Pranavi logs in with email |
-| RLS | Enabled on ALL tables |
-| Policy | All tables locked to authenticated user only |
-| Keys in browser | Anon key only — never service-role key |
-| Portability | Standard PostgreSQL — no Supabase-specific extensions except uuid-ossp |
-| Migrations | `/supabase/migrations/` — numbered SQL files |
-| Seed | `/supabase/seed.sql` |
+### New Tables
+1. **`linkedin_connections`**: Stores OAuth tokens, refresh tokens, user URN, granted scopes, expires_at.
+2. **`automation_settings`**: Global `auto_mode_enabled` (boolean), `pause_all_publishing` (boolean), `min_confidence_score` (int).
+3. **`publishing_attempts`**: Audit log of API requests, responses, HTTP status, retry counts, failure reasons.
+4. **`automation_events`**: Event audit trail (e.g. `FAILSAFE_TRIGGERED`, `TOKEN_EXPIRED`, `NEEDS_INPUT`).
 
-### Tables (16 — V1)
-
-`brand_profile` · `sources` · `watchlist_entities` · `research_signals` · `topic_clusters` · `topic_scores` · `content_ideas` · `drafts` · `draft_versions` · `personal_inputs` · `approvals` · `content_calendar` · `published_posts` · `post_metrics` · `weekly_reports` · `learning_memory`
-
-*`network_recommendations` deferred to Phase 2.*
+### Extended Tables
+- **`published_posts`**: Stores `linkedin_post_urn`, `linkedin_permalink`, `publication_status` (`scheduled`, `publishing`, `published`, `failed`, `needs_review`).
 
 ---
 
-## 4. Workflow Orchestration (n8n)
+## 4. n8n Workflows (W1–W9 Map)
 
-| Requirement | Specification |
-|-------------|--------------|
-| Edition | Community Edition — self-hosted |
-| Cloud | ❌ Do not use n8n Cloud |
-| Workflow storage | `/n8n/workflows/*.json` |
-| Credentials | n8n credential store — never in workflow JSON |
-| Dev setup | `npx n8n` on localhost:5678 |
-| Production | Docker or VPS |
-
-### Required Workflows
-
-| ID | Name | Trigger |
-|----|------|---------|
-| W1 | Daily Research | Daily cron |
-| W2 | Deduplicate + Score | After W1 |
-| W3 | Draft Generator | Webhook from frontend |
-| W4 | Approval Routing | After draft created |
-| W5 | Weekly Calendar | Sunday cron |
-| W6 | Metrics Processing | Manual upload trigger |
-| W7 | Weekly Review | Weekly cron |
+| Workflow ID | Name | Trigger | Description |
+|-------------|------|---------|-------------|
+| **W1** | Daily Research | Daily Cron | Scrapes signals via Agent Reach → writes `research_signals` |
+| **W2** | Deduplicate & Score | Post-W1 | Clusters signals, calls AI scoring → writes `topic_scores` |
+| **W3** | Draft Generator | Auto / Webhook | Generates post copy, hooks, carousel outline → saves to `drafts` |
+| **W4** | Automated Quality Gate | Post-W3 | Runs fact-check, voice check, duplicate check, personal input check |
+| **W5** | Weekly Scheduler | Sunday Cron | Assigns top quality-passed drafts to 4 weekly calendar slots |
+| **W6** | LinkedIn Publisher | Schedule Cron | Checks Auto Mode & Quality Gate → publishes via Official API → logs URN |
+| **W7** | LinkedIn Analytics Collector | Daily Cron | Calls Official Analytics API → writes metrics to `post_metrics` |
+| **W8** | Weekly Review | Sunday Night | Analyzes performance → updates `learning_memory` and recommendations |
+| **W9** | Auth Health Check | Daily Cron | Verifies LinkedIn OAuth token expiry → alerts if re-auth is required |
 
 ---
 
-## 5. AI Provider Abstraction
+## 5. Safety & Exception Handling
 
-| Requirement | Specification |
-|-------------|--------------|
-| Abstraction | Single interface — provider swappable via env var |
-| Variable | `AI_PROVIDER=openai` / `ollama` / `gemini` / `groq` |
-| OpenAI | Optional — works when `OPENAI_API_KEY` is set |
-| Ollama | Local option — no cost |
-| Fallback | If no provider configured — show graceful "AI unavailable" state |
-| Prompt storage | `/prompts/*.md` — not hardcoded in workflow JSON |
-
-### Required Prompts
-
-| File | Purpose |
-|------|---------|
-| `prompts/topic-scoring.md` | Score and classify research signals |
-| `prompts/post-drafting.md` | Generate hooks, body, CTA |
-| `prompts/carousel-generation.md` | Generate carousel slide outline |
-| `prompts/weekly-review.md` | Analyze week performance |
-| `prompts/fact-check.md` | Flag unverifiable claims |
-
----
-
-## 6. Research (Agent Reach)
-
-| Requirement | Specification |
-|-------------|--------------|
-| Tool | Agent Reach — open source connector |
-| Isolation | Must remain a pluggable connector layer |
-| Coupling | DB and app must NOT depend on Agent Reach internals |
-| Output schema | Normalized JSON (see below) |
-| Frequency | Daily |
-| Max visible | 5 ranked opportunities per day |
-
-### Normalized Research Signal Output
-
-```json
-{
-  "title": "",
-  "summary": "",
-  "source_name": "",
-  "source_url": "",
-  "published_at": "",
-  "category": "",
-  "raw_text": ""
-}
-```
-
----
-
-## 7. Security Requirements
-
-- No secrets committed to Git — ever
-- `.env.local` is gitignored — never commit
-- `supabase/.temp/` is gitignored
-- Service-role key: n8n server environment only
-- AI provider keys: n8n server environment only
-- Browser receives: Supabase anon key + n8n webhook URLs only
-- RLS policy on every table: `auth.uid() = user_id` or single-user policy
-- LinkedIn: no credential storage, no browser automation
-
----
-
-## 8. Responsive Design Requirements
-
-| Breakpoint | Layout |
-|-----------|--------|
-| `< 768px` (mobile) | Bottom navigation, stacked cards, full-width |
-| `768px – 1024px` (tablet) | Collapsible sidebar or top nav |
-| `> 1024px` (desktop) | Fixed sidebar + content area |
-
-Do not simply shrink desktop tables. Use cards and stacked layouts for mobile.
+Publication is automatically blocked and flagged as `NEEDS REVIEW` if:
+1. `auto_mode_enabled` is set to `FALSE` or `pause_all_publishing` is `TRUE`.
+2. Fact-check status is `flagged` or confidence score is below threshold.
+3. Content requires new personal experience not found in stored `learning_memory` / Personal Memory.
+4. LinkedIn OAuth token is expired or unauthorized.
+5. Official LinkedIn API returns 4xx / 5xx permanent error.
