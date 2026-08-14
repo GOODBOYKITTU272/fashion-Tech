@@ -139,6 +139,20 @@ export async function sendTelegramTextMessage(chatId: string, text: string): Pro
 }
 
 /**
+ * deleteTelegramMessage
+ */
+export async function deleteTelegramMessage(chatId: string, messageId: number): Promise<void> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN
+  if (!botToken) return
+  await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: String(chatId), message_id: messageId })
+  })
+}
+
+
+/**
  * handleTelegramWebhookCallback
  * Authenticates callback from Telegram bot, updates content_calendar and drafts approval status cleanly.
  */

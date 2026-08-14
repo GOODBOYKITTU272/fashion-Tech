@@ -3,7 +3,8 @@ import {
   handleTelegramWebhookCallback,
   handleTelegramMessageText,
   answerTelegramCallbackQuery,
-  sendTelegramTextMessage
+  sendTelegramTextMessage,
+  deleteTelegramMessage
 } from '@/lib/telegram-bot'
 
 export const dynamic = 'force-dynamic'
@@ -17,6 +18,7 @@ export async function POST(req: Request) {
       const callbackQuery = body.callback_query
       const callbackQueryId = callbackQuery.id
       const chatId = callbackQuery.message?.chat?.id
+      const messageId = callbackQuery.message?.message_id
 
       const result = await handleTelegramWebhookCallback(callbackQuery)
 
@@ -25,7 +27,11 @@ export async function POST(req: Request) {
       }
 
       if (chatId) {
-        await sendTelegramTextMessage(String(chatId), `<b>Notification:</b> ${result.message}`)
+        if (result.action === 'REJECTED' && messageId) {
+          await deleteTelegramMessage(String(chatId), messageId)
+        } else {
+          await sendTelegramTextMessage(String(chatId), `<b>Notification:</b> ${result.message}`)
+        }
       }
 
       return NextResponse.json({ ok: true, source: 'callback_query', result })
