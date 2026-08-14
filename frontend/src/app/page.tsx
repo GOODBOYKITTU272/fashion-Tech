@@ -37,6 +37,8 @@ interface ControlRoomStatusData {
 export default function TodayPage() {
   const [data, setData] = useState<ControlRoomStatusData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [dryRunLoading, setDryRunLoading] = useState(false)
+  const [dryRunResult, setDryRunResult] = useState<any>(null)
 
   useEffect(() => {
     async function loadStatus() {
@@ -54,6 +56,31 @@ export default function TodayPage() {
     }
     loadStatus()
   }, [])
+
+  const handleRunDryTest = async (validateOnly = false) => {
+    setDryRunLoading(true)
+    setDryRunResult(null)
+    try {
+      const res = await fetch('/api/publisher/dry-run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          calendarId: nextPost?.id,
+          validateOnly
+        })
+      })
+      const json = await res.json()
+      setDryRunResult(json)
+    } catch (err: any) {
+      setDryRunResult({
+        success: false,
+        status: 'ERROR',
+        reasons: [err.message || 'Dry test request failed']
+      })
+    } finally {
+      setDryRunLoading(false)
+    }
+  }
 
   const autoState = data?.automation
   const linkedinState = data?.linkedin
@@ -117,7 +144,7 @@ export default function TodayPage() {
                   {nextPost.title}
                 </h2>
                 <p style={{ fontSize: '0.825rem', color: 'var(--text-2)', margin: 0 }}>
-                  Scheduled for <strong>{nextPost.planned_date} · {nextPost.pillar} Pillar</strong>
+                  Scheduled for <strong>{nextPost.planned_date} · {nextPost.pillar} Pillar ({nextPost.format})</strong>
                 </p>
               </div>
 
@@ -150,7 +177,7 @@ export default function TodayPage() {
             </p>
             <p style={{ fontSize: '0.8rem', color: gateResult?.allowed ? 'var(--green)' : 'var(--accent)', marginTop: '0.2rem' }}>
               {gateResult?.allowed
-                ? '✅ ELIGIBLE — Ready for automated publishing'
+                ? '✅ ELIGIBLE — Ready for dry-run simulation'
                 : `BLOCKED — Reason Code: ${gateResult?.reason_code || 'LINKEDIN_NOT_CONNECTED'}`
               }
             </p>
@@ -161,10 +188,44 @@ export default function TodayPage() {
             )}
           </div>
 
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>
-            LinkedIn Posts API Publishing Status: <strong style={{ color: 'var(--accent)' }}>NOT TRIGGERED (W6 Inactive)</strong>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <button 
+              disabled={dryRunLoading} 
+              className="btn btn-secondary btn-sm"
+              onClick={() => handleRunDryTest(true)}
+            >
+              {dryRunLoading ? 'Validating...' : '🔍 Validate Payload Only'}
+            </button>
+            <button 
+              disabled={dryRunLoading} 
+              className="btn btn-primary btn-sm"
+              onClick={() => handleRunDryTest(false)}
+            >
+              {dryRunLoading ? 'Running...' : '🧪 Run Publishing Dry Test'}
+            </button>
           </div>
         </div>
+
+        {/* DRY RUN RESULT DISPLAY BANNER */}
+        {dryRunResult && (
+          <div style={{ marginTop: '1rem', padding: '0.85rem', borderRadius: 'var(--radius-sm)', background: dryRunResult.success ? 'var(--green-dim)' : 'var(--accent-dim)', border: '1px solid var(--border)', fontSize: '0.8rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, color: dryRunResult.success ? 'var(--green)' : 'var(--accent)' }}>
+              <span>🧪 W6 Publisher Dry-Run Status: {dryRunResult.status}</span>
+              <span>{dryRunResult.idempotency_key}</span>
+            </div>
+            {dryRunResult.reasons && (
+              <p style={{ color: 'var(--text-2)', marginTop: '0.25rem' }}>{dryRunResult.reasons[0]}</p>
+            )}
+            {dryRunResult.payload_preview && (
+              <details style={{ marginTop: '0.5rem' }}>
+                <summary style={{ cursor: 'pointer', color: 'var(--primary)', fontWeight: 500 }}>View Generated Payload Preview ({dryRunResult.payload_preview.request_type})</summary>
+                <pre style={{ background: '#111', padding: '0.5rem', borderRadius: '4px', fontSize: '0.725rem', overflowX: 'auto', marginTop: '0.4rem', color: '#e0e0e0' }}>
+                  {JSON.stringify(dryRunResult.payload_preview, null, 2)}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
       </div>
 
       {/* TODAY'S INBOX OPPORTUNITIES LIST */}

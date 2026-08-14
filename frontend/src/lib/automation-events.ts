@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 export type AutomationEventType =
   | 'FAILSAFE_TRIGGERED'
@@ -7,6 +7,11 @@ export type AutomationEventType =
   | 'REAUTH_REQUIRED'
   | 'PERMISSION_MISSING'
   | 'QUALITY_GATE_FAILED'
+  | 'DUPLICATE_ATTEMPT_BLOCKED'
+  | 'CONTENT_PAYLOAD_INCOMPLETE'
+  | 'MEDIA_NOT_READY'
+  | 'PUBLISH_GATE_BLOCKED'
+  | 'PUBLISH_DRY_RUN_SUCCESS'
 
 export type AutomationEventSeverity = 'info' | 'warning' | 'critical'
 
@@ -22,11 +27,12 @@ export async function logAutomationEvent(params: LogAutomationEventParams): Prom
   const { userId, eventType, severity, message, metadata } = params
 
   try {
+    const admin = getSupabaseAdmin()
     const ownerUserId = userId || '22ff14e8-10c3-44b8-a77b-1a656e1255ef'
 
     // Deduplicate recent identical messages within 5 minutes to avoid log spam
     const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-    const { data: recent } = await supabase
+    const { data: recent } = await admin
       .from('automation_events')
       .select('id')
       .eq('user_id', ownerUserId)
@@ -39,7 +45,7 @@ export async function logAutomationEvent(params: LogAutomationEventParams): Prom
       return // Skip duplicate log within 5 minutes
     }
 
-    await supabase.from('automation_events').insert({
+    await admin.from('automation_events').insert({
       user_id: ownerUserId,
       event_type: eventType,
       severity,
