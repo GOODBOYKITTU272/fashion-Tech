@@ -9,23 +9,21 @@ const SOURCES = [
   { name: 'Craft Council',       tier: 2, trust: 75, category: 'Craftsmanship', active: true },
 ]
 
-const WATCHLIST = [
-  { name: 'Iris van Herpen', type: 'designer', score: 90 },
-  { name: 'Rahul Mishra',    type: 'designer', score: 85 },
-  { name: 'Sabyasachi',      type: 'brand',    score: 80 },
-  { name: 'Institute of Digital Fashion', type: 'organization', score: 85 },
-]
-
 const TIER_COLOR: Record<number, string> = { 1: 'var(--green)', 2: 'var(--accent)', 3: 'var(--text-2)' }
 
 export default function SettingsPage() {
   const [autoMode, setAutoMode] = useState(true)
   const [pausePublishing, setPausePublishing] = useState(false)
+  const [minConfidence, setMinConfidence] = useState(70)
+  const [savingSettings, setSavingSettings] = useState(false)
+
   const [integrationStatus, setIntegrationStatus] = useState<string>('WAITING_FOR_API_ACCESS')
-  const [scopes, setScopes] = useState<string[]>(['w_member_social', 'r_member_postAnalytics', 'r_member_profileAnalytics'])
+  const [scopes, setScopes] = useState<string[]>([])
   const [memberUrn, setMemberUrn] = useState<string | null>(null)
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
+  const [lastVerified, setLastVerified] = useState<string | null>(null)
 
+  // Fetch real persisted status on mount
   useEffect(() => {
     async function fetchStatus() {
       try {
@@ -35,20 +33,47 @@ export default function SettingsPage() {
           setIntegrationStatus(data.integration_status || 'WAITING_FOR_API_ACCESS')
           setAutoMode(data.auto_mode_enabled ?? true)
           setPausePublishing(data.pause_all_publishing ?? false)
-          if (data.connection) {
-            setMemberUrn(data.connection.linkedin_member_urn)
-            setExpiresAt(data.connection.expires_at)
-            if (data.connection.granted_scopes) {
-              setScopes(data.connection.granted_scopes)
-            }
-          }
+          setMinConfidence(data.min_confidence_score ?? 70)
+          setMemberUrn(data.linkedin_member_urn || null)
+          setExpiresAt(data.expires_at || null)
+          setLastVerified(data.last_verified_at || null)
+          setScopes(Array.isArray(data.granted_scopes) ? data.granted_scopes : [])
         }
       } catch (err) {
-        console.error('Failed to load status', err)
+        console.error('Failed to load LinkedIn integration status', err)
       }
     }
     fetchStatus()
   }, [])
+
+  // Persist Auto Mode & Emergency Pause changes to Database
+  const updateAutomationSettings = async (newAutoMode: boolean, newPause: boolean) => {
+    setSavingSettings(true)
+    try {
+      const res = await fetch('/api/automation/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auto_mode_enabled: newAutoMode,
+          pause_all_publishing: newPause,
+          min_confidence_score: minConfidence
+        })
+      })
+
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.error || 'Database save failed')
+      }
+
+      // Update state after confirmed DB persistence
+      setAutoMode(newAutoMode)
+      setPausePublishing(newPause)
+    } catch (err: any) {
+      alert(`Failed to persist automation setting: ${err.message}`)
+    } finally {
+      setSavingSettings(false)
+    }
+  }
 
   return (
     <div className="page">
@@ -59,7 +84,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* AUTOMATION CONTROL SECTION */}
+      {/* AUTOMATION CONTROL SECTION WITH DB PERSISTENCE */}
       <div className="card card-pad" style={{ marginBottom: '1.5rem', borderColor: pausePublishing ? 'var(--red)' : 'var(--border)' }}>
         <h2 className="section-title">⚡ Automation Controls</h2>
         
@@ -71,10 +96,11 @@ export default function SettingsPage() {
               <p style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>Automates research, scoring, PDF carousel briefs, scheduling, and official API posting.</p>
             </div>
             <button 
+              disabled={savingSettings}
               className={`btn ${autoMode ? 'btn-success' : 'btn-ghost'}`}
-              onClick={() => setAutoMode(!autoMode)}
+              onClick={() => updateAutomationSettings(!autoMode, pausePublishing)}
             >
-              {autoMode ? 'AUTO MODE: ON' : 'AUTO MODE: OFF'}
+              {savingSettings ? 'Saving...' : autoMode ? 'AUTO MODE: ON' : 'AUTO MODE: OFF'}
             </button>
           </div>
 
@@ -85,10 +111,11 @@ export default function SettingsPage() {
               <p style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>Instantly blocks all scheduled publishing jobs regardless of Auto Mode state.</p>
             </div>
             <button 
+              disabled={savingSettings}
               className={`btn ${pausePublishing ? 'btn-danger' : 'btn-ghost'}`}
-              onClick={() => setPausePublishing(!pausePublishing)}
+              onClick={() => updateAutomationSettings(autoMode, !pausePublishing)}
             >
-              {pausePublishing ? '⛔ ALL PUBLISHING PAUSED' : 'PAUSE ALL PUBLISHING'}
+              {savingSettings ? 'Saving...' : pausePublishing ? '⛔ ALL PUBLISHING PAUSED' : 'PAUSE ALL PUBLISHING'}
             </button>
           </div>
         </div>
@@ -135,12 +162,21 @@ export default function SettingsPage() {
             <span style={{ fontWeight: 500 }}>{memberUrn || 'Not Connected'}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
-            <span style={{ color: 'var(--text-3)' }}>Target Scopes</span>
-            <span>{scopes.map(s => <span key={s} className="badge badge-gray" style={{ marginLeft: '4px' }}>{s}</span>)}</span>
+            <span style={{ color: 'var(--text-3)' }}>Granted Scopes</span>
+            <span>
+              {scopes.length > 0 
+                ? scopes.map(s => <span key={s} className="badge badge-gray" style={{ marginLeft: '4px' }}>{s}</span>)
+                : <span style={{ color: 'var(--text-3)' }}>No scopes granted yet</span>
+              }
+            </span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
             <span style={{ color: 'var(--text-3)' }}>Token Expiry</span>
             <span style={{ fontWeight: 500 }}>{expiresAt ? new Date(expiresAt).toLocaleDateString() : 'N/A'}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ color: 'var(--text-3)' }}>Last Verified</span>
+            <span style={{ fontWeight: 500 }}>{lastVerified ? new Date(lastVerified).toLocaleTimeString() : 'N/A'}</span>
           </div>
         </div>
 
@@ -162,46 +198,6 @@ export default function SettingsPage() {
           <label className="form-label">Voice Guidelines</label>
           <textarea className="form-textarea" style={{ minHeight: '80px' }}
             defaultValue="Curious, intelligent, grounded, learning in public. Never pretending to be an expert where still learning." />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Target Audience</label>
-          <input className="form-input" defaultValue="Fashion professionals, designers, fashion-tech people, textile researchers — USA + UK" />
-        </div>
-        <button className="btn btn-primary btn-sm">Save Profile</button>
-      </div>
-
-      {/* Sources */}
-      <div className="card card-pad" style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <h2 className="section-title" style={{ margin: 0 }}>Source Registry</h2>
-          <button className="btn btn-ghost btn-sm">+ Add Source</button>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-          {SOURCES.map((s, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 0.75rem',
-              borderRadius: 'var(--radius-sm)', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: '0.875rem', fontWeight: 500 }}>{s.name}</p>
-                <p style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{s.category}</p>
-              </div>
-              <span style={{ fontSize: '0.7rem', fontWeight: 600, color: TIER_COLOR[s.tier] }}>T{s.tier}</span>
-              <span className="badge badge-gray">{s.trust}/100</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* AI Provider */}
-      <div className="card card-pad">
-        <h2 className="section-title">AI Provider Abstraction</h2>
-        <div className="form-group">
-          <label className="form-label">Current Provider</label>
-          <select className="form-select">
-            <option value="openai">OpenAI (GPT-4o-mini)</option>
-            <option value="gemini">Gemini (1.5 Flash)</option>
-            <option value="ollama">Ollama (Local Model)</option>
-          </select>
         </div>
       </div>
     </div>

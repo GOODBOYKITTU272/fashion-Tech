@@ -3,8 +3,11 @@ import crypto from 'crypto'
 const ALGORITHM = 'aes-256-gcm'
 
 function getEncryptionKey(): Buffer {
-  const secret = process.env.LINKEDIN_TOKEN_ENCRYPTION_KEY || 'fashion-tech-default-32-byte-encryption-secret-key!'
-  // Ensure key is exactly 32 bytes
+  const secret = process.env.LINKEDIN_TOKEN_ENCRYPTION_KEY
+  if (!secret) {
+    throw new Error('LINKEDIN_TOKEN_ENCRYPTION_KEY environment variable is required for AES-256-GCM token security.')
+  }
+  // Ensure key is derived into a 32-byte Buffer via SHA-256
   return crypto.createHash('sha256').update(secret).digest()
 }
 
