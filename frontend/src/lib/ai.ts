@@ -175,7 +175,8 @@ async function callTextModel(systemPrompt: string, userPrompt: string, jsonMode 
 /**
  * generateImage
  * Generates visual asset via OpenRouter image generation model google/gemini-3.1-flash-image (Nano Banana 2).
- * Uploads generated asset to Supabase Storage bucket for persistent URL storage.
+ * Uploads generated asset to Supabase Storage bucket 'media' for persistent URL storage.
+ * Verifies that HTTP fetch of persistent URL returns 200 OK image content.
  * Throws IMAGE_GENERATION_UNAVAILABLE on failure.
  */
 export async function generateImage(prompt: string): Promise<{
@@ -192,7 +193,6 @@ export async function generateImage(prompt: string): Promise<{
   const imageModel = process.env.OPENROUTER_IMAGE_MODEL || 'google/gemini-3.1-flash-image'
 
   try {
-    // Attempt 1: Call OpenRouter images API endpoint
     const res = await fetch('https://openrouter.ai/api/v1/images', {
       method: 'POST',
       headers: {
@@ -209,56 +209,62 @@ export async function generateImage(prompt: string): Promise<{
       })
     })
 
-    let imageUrl = ''
-    if (res.ok) {
-      const data = await res.json()
-      imageUrl = data.data?.[0]?.url || data.images?.[0]?.url || ''
+    if (!res.ok) {
+      const errText = await res.text()
+      throw new Error(`OpenRouter /v1/images HTTP error ${res.status}: ${errText}`)
     }
 
-    if (!imageUrl) {
-      // Fallback Attempt 2: OpenRouter chat completions for image generation model
-      const chatRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openrouterKey}`,
-          'HTTP-Referer': 'https://fashion-tech-delta.vercel.app',
-          'X-Title': 'Pranavi Fashion Tech Content Engine'
-        },
-        body: JSON.stringify({
-          model: imageModel,
-          messages: [{ role: 'user', content: `Generate fashion-tech graphic image for prompt: ${prompt}` }]
-        })
-      })
+    const data = await res.json()
+    const rawB64 = data.data?.[0]?.b64_json || data.images?.[0]?.b64_json
+    const rawUrl = data.data?.[0]?.url || data.images?.[0]?.url || data.images?.[0]?.image_url
 
-      if (chatRes.ok) {
-        const chatData = await chatRes.json()
-        const content = chatData.choices?.[0]?.message?.content || ''
-        const urlMatch = content.match(/https?:\/\/[^\s"']+\.(png|jpg|jpeg|webp)/i)
-        imageUrl = urlMatch ? urlMatch[0] : ''
+    let imgBuffer: Buffer
+    let contentType = data.data?.[0]?.media_type || 'image/png'
+
+    if (rawB64) {
+      imgBuffer = Buffer.from(rawB64, 'base64')
+    } else if (rawUrl) {
+      if (rawUrl.startsWith('data:image/')) {
+        const parts = rawUrl.split(';base64,')
+        contentType = parts[0].replace('data:', '')
+        imgBuffer = Buffer.from(parts[1], 'base64')
+      } else {
+        const imgRes = await fetch(rawUrl)
+        if (!imgRes.ok) throw new Error(`Failed to fetch raw image URL: ${imgRes.statusText}`)
+        contentType = imgRes.headers.get('content-type') || 'image/png'
+        const arrayBuf = await imgRes.arrayBuffer()
+        imgBuffer = Buffer.from(arrayBuf)
       }
-    }
-
-    if (!imageUrl) {
-      throw new Error(`IMAGE_GENERATION_UNAVAILABLE: Image model ${imageModel} returned no image URL`)
+    } else {
+      throw new Error(`Image model ${imageModel} returned no image URL or b64_json in response data`)
     }
 
     // Persist image binary into Supabase Storage
-    const imgBuffer = await (await fetch(imageUrl)).arrayBuffer()
-    const fileName = `generated_${Date.now()}_${Math.random().toString(36).substring(7)}.png`
+    const ext = contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : 'png'
+    const fileName = `generated_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`
     const admin = getSupabaseAdmin()
 
     const { data: storageData, error: storageErr } = await admin.storage
       .from('media')
       .upload(`fashion_tech/${fileName}`, imgBuffer, {
-        contentType: 'image/png',
+        contentType: contentType,
         upsert: true
       })
 
-    let persistentUrl = imageUrl
-    if (!storageErr && storageData) {
-      const { data: pubUrlData } = admin.storage.from('media').getPublicUrl(`fashion_tech/${fileName}`)
-      persistentUrl = pubUrlData.publicUrl
+    if (storageErr || !storageData) {
+      throw new Error(`Failed to upload generated image to Supabase Storage: ${storageErr?.message}`)
+    }
+
+    const { data: pubUrlData } = admin.storage.from('media').getPublicUrl(`fashion_tech/${fileName}`)
+    const persistentUrl = pubUrlData.publicUrl
+
+    // Verify HTTP fetch of persistent image URL returns successful image content
+    const verifyRes = await fetch(persistentUrl, { method: 'HEAD' })
+    if (!verifyRes.ok && verifyRes.status !== 405) {
+      const verifyGet = await fetch(persistentUrl)
+      if (!verifyGet.ok) {
+        throw new Error(`Persistent image URL verification failed (HTTP ${verifyGet.status}): ${persistentUrl}`)
+      }
     }
 
     return {
@@ -268,7 +274,7 @@ export async function generateImage(prompt: string): Promise<{
       image_prompt: prompt
     }
   } catch (err: any) {
-    console.error('generateImage exception:', err)
+    console.error('generateImage failure:', err)
     throw new Error(`IMAGE_GENERATION_UNAVAILABLE: Failed to generate image via ${imageModel}: ${err.message}`)
   }
 }
@@ -348,7 +354,7 @@ export async function generateDraft(title: string, summary: string, pillar = 'Ed
   }
 
   const isImageRequired = ['single_image', 'image', 'graphic', 'editorial_graphic'].includes(format.toLowerCase())
-  const isTextOnly = ['text', 'text_only', 'article'].includes(format.toLowerCase())
+  const isTextOnly = ['text', 'text_only', 'article', 'newsletter feature'].includes(format.toLowerCase())
 
   let imageResult: { image_url?: string; image_provider?: string; image_model?: string; image_prompt?: string } = {}
   let imageStatus: DraftResult['image_generation_status'] = 'none'
