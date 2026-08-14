@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { authenticatedFetch } from '@/lib/authenticated-fetch'
+import { RESEARCH_CHANNELS } from '@/lib/research-channels'
+import { FASHION_QUERY_PACK } from '@/lib/fashion-query-pack'
 
 interface UpcomingPost {
   id: string
@@ -25,6 +27,8 @@ interface ResearchSignal {
   url: string
   title: string
   category: string
+  platform?: string
+  query_used?: string
   relevance_status?: string
   relevance_score?: number
   topic_family?: string
@@ -261,7 +265,7 @@ export default function TodayPage() {
           <div style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
             <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>W1 Research</p>
             <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--green)', margin: '0.2rem 0' }}>ACTIVE</p>
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-2)', margin: 0 }}>Safe HTTP RSS</p>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-2)', margin: 0 }}>Safe HTTP RSS + Jina</p>
           </div>
 
           <div style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
@@ -372,36 +376,44 @@ export default function TodayPage() {
         )}
       </div>
 
-      {/* 3. RESEARCH SOURCES & RUNTIME TOOLS */}
+      {/* 3. AGENT REACH & RESEARCH CHANNELS REGISTRY */}
       <div className="card card-pad" style={{ marginBottom: '1.5rem' }}>
         <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span>🌐</span> PRODUCTION RESEARCH SOURCES &amp; TOOLS
+          <span>🛰️</span> AGENT REACH RESEARCH CHANNELS &amp; RUNTIME REGISTRY
         </h2>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem' }}>
-          {engine?.research_sources.map(src => (
-            <div key={src.name} style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{src.name}</span>
-                <span className="badge badge-green" style={{ fontSize: '0.65rem' }}>{src.status}</span>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem' }}>
+          {RESEARCH_CHANNELS.map(ch => (
+            <div key={ch.channel_id} style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{ch.channel_name}</span>
+                <span className={`badge ${ch.production_safe ? 'badge-green' : 'badge-yellow'}`} style={{ fontSize: '0.65rem' }}>
+                  {ch.production_safe ? `ACTIVE (${ch.runtime.toUpperCase()})` : `LOCAL_ONLY`}
+                </span>
               </div>
-              <p style={{ fontSize: '0.725rem', color: 'var(--text-3)', margin: '0.25rem 0 0 0', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                {src.url}
+              <p style={{ fontSize: '0.725rem', color: 'var(--text-3)', margin: 0 }}>
+                Platform: <strong>{ch.platform}</strong> | Priority: <strong>{ch.priority}</strong>
               </p>
             </div>
           ))}
         </div>
 
-        <div style={{ paddingTop: '0.75rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)' }}>Runtime Tools:</span>
-          <span className="badge badge-green">RSS HTTP: ACTIVE</span>
-          <span className="badge badge-blue">Jina Reader: ACTIVE (FALLBACK ENRICHMENT)</span>
-          <span className="badge badge-gray">Agent Reach CLI: LOCAL ONLY</span>
-          <span className="badge badge-gray">Agent Reach Production: NOT DEPLOYED</span>
+        {/* FASHION QUERY PACK CLUSTERS */}
+        <div style={{ paddingTop: '0.75rem', borderTop: '1px solid var(--border)' }}>
+          <p style={{ fontSize: '0.825rem', fontWeight: 600, margin: '0 0 0.5rem 0', color: 'var(--text-2)' }}>
+            🎯 Fashion Query Pack Clusters (Code × Craft × Contemporary Design):
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {Object.values(FASHION_QUERY_PACK).map(cluster => (
+              <span key={cluster.id} className="badge badge-blue" style={{ fontSize: '0.7rem' }}>
+                {cluster.name} ({cluster.queries.length} queries)
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* 4. RECENT RESEARCH SIGNALS WITH RELEVANCE STATUS */}
+      {/* 4. RECENT RESEARCH SIGNALS WITH RELEVANCE STATUS & PROVENANCE */}
       <div className="card card-pad">
         <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span>📡</span> DISCOVERED RESEARCH SIGNALS &amp; RELEVANCE GATE
@@ -413,7 +425,7 @@ export default function TodayPage() {
               <div key={sig.id} style={{ background: '#18181b', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <div style={{ flex: 1, minWidth: '240px' }}>
                   <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: '0.2rem' }}>
-                    <span className="badge badge-gray" style={{ fontSize: '0.65rem' }}>{sig.source_name}</span>
+                    <span className="badge badge-gray" style={{ fontSize: '0.65rem' }}>{sig.platform || 'RSS'} · {sig.source_name}</span>
                     <span className="badge badge-blue" style={{ fontSize: '0.65rem' }}>{sig.topic_family || sig.category}</span>
                   </div>
                   <h4 style={{ fontSize: '0.875rem', fontWeight: 500, margin: 0 }}>{sig.title}</h4>

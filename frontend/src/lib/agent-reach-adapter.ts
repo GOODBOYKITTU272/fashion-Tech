@@ -1,6 +1,8 @@
 import { getSupabaseAdmin } from './supabase-admin'
 import crypto from 'crypto'
 import { evaluateResearchRelevance } from './relevance-gate'
+import { getProductionSafeChannels } from './research-channels'
+import { getRandomQueryFromCluster } from './fashion-query-pack'
 
 export interface CanonicalResearchSignal {
   source_name: string
@@ -12,6 +14,11 @@ export interface CanonicalResearchSignal {
   category: string
   raw_text: string | null
   source_type: 'rss' | 'web_search' | 'web_scrape'
+  platform: string
+  query_used?: string
+  runtime: 'cloud' | 'local'
+  agent_reach_used: boolean
+  trust_score: number
   relevance_status?: 'accepted' | 'rejected' | 'failed'
   relevance_score?: number
   topic_family?: string
@@ -38,22 +45,26 @@ const SAFE_FASHION_RSS_FEEDS = [
   {
     name: 'FashionUnited Global',
     url: 'https://fashionunited.com/rss-news',
-    category: 'Contemporary & Sustainable Fashion'
+    category: 'Contemporary & Sustainable Fashion',
+    clusterId: 'CONTEMPORARY_DESIGN'
   },
   {
     name: 'Textile Today Global',
     url: 'https://www.textiletoday.com.bd/feed/',
-    category: 'Textile Innovation & Craftsmanship'
+    category: 'Textile Innovation & Craftsmanship',
+    clusterId: 'TEXTILES'
   },
   {
     name: 'Fibre2Fashion News',
     url: 'https://www.fibre2fashion.com/rss/news/fashion-news.xml',
-    category: 'Textile & Apparel Industry'
+    category: 'Textile & Apparel Industry',
+    clusterId: 'INDIAN_CRAFT'
   },
   {
     name: 'Apparel Resources Tech',
     url: 'https://apparelresources.com/feed/',
-    category: 'Fashion Technology & Supply Chain'
+    category: 'Fashion Technology & Supply Chain',
+    clusterId: 'FASHION_TECH'
   }
 ]
 
@@ -107,7 +118,7 @@ export async function fetchJinaWebReader(targetUrl: string): Promise<{ title: st
 /**
  * runAgentReachW1Ingestion
  * Master W1 ingestion workflow using safe HTTP RSS connectors & Jina Web Reader enrichment.
- * Evaluates fashion relevance gate before DB insertion.
+ * Evaluates fashion relevance gate before DB insertion and stores full provenance.
  */
 export async function runAgentReachW1Ingestion(userId: string): Promise<IngestionResult> {
   const resultSignals: CanonicalResearchSignal[] = []
@@ -139,6 +150,7 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
 
   for (const feed of SAFE_FASHION_RSS_FEEDS) {
     try {
+      const queryUsed = getRandomQueryFromCluster(feed.clusterId)
       const res = await fetch(feed.url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } })
       if (!res.ok) {
         errors.push(`Failed to fetch RSS feed ${feed.name}: HTTP ${res.status}`)
@@ -181,9 +193,11 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
 
         // Attempt Jina enrichment if available
         let enrichedContent = summary
+        let jinaUsed = false
         const jinaData = await fetchJinaWebReader(link)
         if (jinaData && jinaData.content) {
           enrichedContent = `${summary || ''}\n\n${jinaData.content}`.trim()
+          jinaUsed = true
         }
 
         // 4. Run Fashion Relevance Gate Check
@@ -205,17 +219,27 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
           category: feed.category,
           raw_text: enrichedContent,
           source_type: 'rss',
+          platform: 'RSS',
+          query_used: queryUsed,
+          runtime: 'cloud',
+          agent_reach_used: false,
+          trust_score: 85,
           relevance_status: relevanceResult.relevance_status,
           relevance_score: relevanceResult.relevance_score,
           topic_family: relevanceResult.topic_family,
           relevance_reason: relevanceResult.relevance_reason
         }
 
-        // Insert persistent signal into public.research_signals
+        // Insert persistent signal into public.research_signals with full provenance
         // If rejected by relevance gate, set processed = true so it never enters W2
         const { error: insertErr } = await admin.from('research_signals').insert({
           source_name: signal.source_name,
           source_type: signal.source_type,
+          platform: signal.platform,
+          query_used: signal.query_used,
+          runtime: signal.runtime,
+          agent_reach_used: signal.agent_reach_used,
+          trust_score: signal.trust_score,
           url: signal.source_url,
           title: signal.title,
           summary: signal.summary,
