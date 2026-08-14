@@ -35,7 +35,7 @@ export interface PipelineExecutionTrace {
 /**
  * runProductionPipeline
  * Master production pipeline orchestrator running on Vercel Serverless.
- * Executes W1 -> W6 dry-run in a single traceable run using OpenRouter + Gemini 3.5 Flash.
+ * Executes W1 -> W6 dry-run using OpenRouter google/gemini-3.5-flash (Text) and google/gemini-3.1-flash-image (Image).
  * Fully fail-closed with persisted run history in public.pipeline_runs.
  */
 export async function runProductionPipeline(userId: string): Promise<PipelineExecutionTrace> {
@@ -131,7 +131,7 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
     const signal = unprocessedSignals[0]
     trace.id_trace.research_signal_id = signal.id
 
-    // Call W2 scoreTopic via OpenRouter Gemini 3.5 Flash
+    // Call W2 scoreTopic via Text Model (OpenRouter google/gemini-3.5-flash)
     const scoreResult = await scoreTopic(signal.title, signal.summary || '')
 
     // Create topic_clusters record
@@ -179,8 +179,8 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
     await admin.from('research_signals').update({ processed: true }).eq('id', signal.id)
 
     trace.stage_results.w2_scoring = {
-      provider: scoreResult.provider,
-      model: scoreResult.model,
+      text_provider: scoreResult.provider,
+      text_model: scoreResult.model,
       signal_id: signal.id,
       cluster_id: cluster.id,
       topic_score_id: topicScoreRow.id,
@@ -219,7 +219,7 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
     }
 
     // ==================================================
-    // STAGE W3: DRAFT GENERATION
+    // STAGE W3: DRAFT GENERATION (TEXT + IMAGE SPLIT)
     // ==================================================
     trace.current_stage = 'W3_DRAFTING'
     await updateDbRun({ current_stage: 'W3_DRAFTING' })
@@ -231,7 +231,7 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
       scoreResult.recommended_format
     )
 
-    // Insert draft into DB with default pending quality gate
+    // Insert draft into DB with text & image provider model metadata
     const { data: draft, error: draftErr } = await admin
       .from('drafts')
       .insert({
@@ -243,19 +243,31 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
         pillar: draftResult.pillar,
         format: draftResult.format,
         quality_gate_status: 'pending',
-        confidence_score: null
+        confidence_score: null,
+        text_provider: draftResult.text_provider,
+        text_model: draftResult.text_model,
+        image_provider: draftResult.image_provider,
+        image_model: draftResult.image_model,
+        image_url: draftResult.image_url,
+        image_prompt: draftResult.image_prompt,
+        image_generation_status: draftResult.image_generation_status
       })
       .select()
       .single()
 
     if (draftErr || !draft) {
-      throw new Error(`Failed to persist draft: ${draftErr?.message}`)
+      throw new Error(`Failed to persist draft with image metadata: ${draftErr?.message}`)
     }
 
     trace.id_trace.draft_id = draft.id
     trace.stage_results.w3_drafting = {
-      provider: draftResult.provider,
-      model: draftResult.model,
+      text_provider: draftResult.text_provider,
+      text_model: draftResult.text_model,
+      image_provider: draftResult.image_provider,
+      image_model: draftResult.image_model,
+      image_url: draftResult.image_url,
+      image_prompt: draftResult.image_prompt,
+      image_generation_status: draftResult.image_generation_status,
       draft_id: draft.id,
       title: draft.title,
       pillar: draft.pillar,
@@ -393,7 +405,7 @@ export async function runProductionPipeline(userId: string): Promise<PipelineExe
   } catch (err: any) {
     console.error(`Production Pipeline Execution Error at stage ${trace.current_stage}:`, err)
     trace.status = 'FAILED'
-    trace.error_code = err.message?.startsWith('OPENROUTER_') ? 'OPENROUTER_UNAVAILABLE' : (err.message?.startsWith('OPENAI_') ? 'OPENAI_UNAVAILABLE' : 'PIPELINE_ERROR')
+    trace.error_code = err.message?.startsWith('IMAGE_') ? 'IMAGE_GENERATION_UNAVAILABLE' : (err.message?.startsWith('OPENROUTER_') ? 'OPENROUTER_UNAVAILABLE' : 'PIPELINE_ERROR')
     trace.failure_reason = err.message || 'Unhandled pipeline execution error'
     trace.completed_at = new Date().toISOString()
 

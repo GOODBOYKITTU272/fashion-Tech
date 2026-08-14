@@ -1,5 +1,6 @@
 import fs from 'fs/promises'
 import path from 'path'
+import { getSupabaseAdmin } from './supabase-admin'
 
 export interface ScoringResult {
   freshness_score: number
@@ -22,8 +23,13 @@ export interface DraftResult {
   full_content: string
   pillar: string
   format: string
-  provider: string
-  model: string
+  text_provider: string
+  text_model: string
+  image_provider?: string
+  image_model?: string
+  image_url?: string
+  image_prompt?: string
+  image_generation_status: 'none' | 'pending' | 'completed' | 'skipped' | 'failed'
   pdf_url?: string
 }
 
@@ -66,19 +72,19 @@ export interface CallModelResponse {
   latency_ms: number
 }
 
-// Call configured AI provider (OpenRouter / OpenAI / Gemini)
-async function callModel(systemPrompt: string, userPrompt: string, jsonMode = false): Promise<CallModelResponse> {
+// Call configured AI Text Provider (OpenRouter google/gemini-3.5-flash)
+async function callTextModel(systemPrompt: string, userPrompt: string, jsonMode = false): Promise<CallModelResponse> {
   const startTime = Date.now()
   const provider = (process.env.AI_PROVIDER || 'openrouter').toLowerCase()
   const openrouterKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY
   const openaiKey = process.env.OPENAI_API_KEY
+  const textModel = process.env.OPENROUTER_TEXT_MODEL || process.env.OPENROUTER_MODEL || 'google/gemini-3.5-flash'
 
   if (provider === 'openrouter' || (openrouterKey && openrouterKey.startsWith('sk-or-v1-'))) {
     if (!openrouterKey || openrouterKey.startsWith('your-')) {
       throw new Error('OPENROUTER_UNAVAILABLE: OPENROUTER_API_KEY is not configured in environment')
     }
 
-    const modelName = process.env.OPENROUTER_MODEL || 'google/gemini-3.5-flash'
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -88,7 +94,7 @@ async function callModel(systemPrompt: string, userPrompt: string, jsonMode = fa
         'X-Title': 'Pranavi Fashion Tech Content Engine'
       },
       body: JSON.stringify({
-        model: modelName,
+        model: textModel,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
@@ -114,7 +120,7 @@ async function callModel(systemPrompt: string, userPrompt: string, jsonMode = fa
     return {
       content,
       provider: 'openrouter',
-      model: modelName,
+      model: textModel,
       latency_ms: latencyMs
     }
   }
@@ -167,17 +173,117 @@ async function callModel(systemPrompt: string, userPrompt: string, jsonMode = fa
 }
 
 /**
+ * generateImage
+ * Generates visual asset via OpenRouter image generation model google/gemini-3.1-flash-image (Nano Banana 2).
+ * Uploads generated asset to Supabase Storage bucket for persistent URL storage.
+ * Throws IMAGE_GENERATION_UNAVAILABLE on failure.
+ */
+export async function generateImage(prompt: string): Promise<{
+  image_url: string
+  image_provider: string
+  image_model: string
+  image_prompt: string
+}> {
+  const openrouterKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY
+  if (!openrouterKey || openrouterKey.startsWith('your-')) {
+    throw new Error('IMAGE_GENERATION_UNAVAILABLE: OPENROUTER_API_KEY is not configured')
+  }
+
+  const imageModel = process.env.OPENROUTER_IMAGE_MODEL || 'google/gemini-3.1-flash-image'
+
+  try {
+    // Attempt 1: Call OpenRouter images API endpoint
+    const res = await fetch('https://openrouter.ai/api/v1/images', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openrouterKey}`,
+        'HTTP-Referer': 'https://fashion-tech-delta.vercel.app',
+        'X-Title': 'Pranavi Fashion Tech Content Engine'
+      },
+      body: JSON.stringify({
+        model: imageModel,
+        prompt: prompt,
+        n: 1,
+        size: '1024x1024'
+      })
+    })
+
+    let imageUrl = ''
+    if (res.ok) {
+      const data = await res.json()
+      imageUrl = data.data?.[0]?.url || data.images?.[0]?.url || ''
+    }
+
+    if (!imageUrl) {
+      // Fallback Attempt 2: OpenRouter chat completions for image generation model
+      const chatRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openrouterKey}`,
+          'HTTP-Referer': 'https://fashion-tech-delta.vercel.app',
+          'X-Title': 'Pranavi Fashion Tech Content Engine'
+        },
+        body: JSON.stringify({
+          model: imageModel,
+          messages: [{ role: 'user', content: `Generate fashion-tech graphic image for prompt: ${prompt}` }]
+        })
+      })
+
+      if (chatRes.ok) {
+        const chatData = await chatRes.json()
+        const content = chatData.choices?.[0]?.message?.content || ''
+        const urlMatch = content.match(/https?:\/\/[^\s"']+\.(png|jpg|jpeg|webp)/i)
+        imageUrl = urlMatch ? urlMatch[0] : ''
+      }
+    }
+
+    if (!imageUrl) {
+      throw new Error(`IMAGE_GENERATION_UNAVAILABLE: Image model ${imageModel} returned no image URL`)
+    }
+
+    // Persist image binary into Supabase Storage
+    const imgBuffer = await (await fetch(imageUrl)).arrayBuffer()
+    const fileName = `generated_${Date.now()}_${Math.random().toString(36).substring(7)}.png`
+    const admin = getSupabaseAdmin()
+
+    const { data: storageData, error: storageErr } = await admin.storage
+      .from('media')
+      .upload(`fashion_tech/${fileName}`, imgBuffer, {
+        contentType: 'image/png',
+        upsert: true
+      })
+
+    let persistentUrl = imageUrl
+    if (!storageErr && storageData) {
+      const { data: pubUrlData } = admin.storage.from('media').getPublicUrl(`fashion_tech/${fileName}`)
+      persistentUrl = pubUrlData.publicUrl
+    }
+
+    return {
+      image_url: persistentUrl,
+      image_provider: 'openrouter',
+      image_model: imageModel,
+      image_prompt: prompt
+    }
+  } catch (err: any) {
+    console.error('generateImage exception:', err)
+    throw new Error(`IMAGE_GENERATION_UNAVAILABLE: Failed to generate image via ${imageModel}: ${err.message}`)
+  }
+}
+
+/**
  * scoreTopic
- * Evaluates topic relevance using LLM.
+ * Evaluates topic relevance using Text Model (google/gemini-3.5-flash).
  * Strictly validates all score fields (0-100). Normalizes recommended_pillar to schema check constraint.
- * Truthfully records provider and model metadata.
  */
 export async function scoreTopic(title: string, summary: string): Promise<ScoringResult> {
   const promptTemplate = await readPromptFile('topic-scoring.md')
   const systemPrompt = promptTemplate || 'Score this topic for relevance. Return JSON object with numeric scores between 0 and 100 for freshness_score, source_trust_score, us_relevance_score, uk_relevance_score, pranavi_alignment_score, total_opportunity_score, and string fields reasoning, recommended_pillar (one of Educational, Storytelling, Soft Selling), recommended_format.'
   const userPrompt = JSON.stringify({ title, summary })
 
-  const aiRes = await callModel(systemPrompt, userPrompt, true)
+  const aiRes = await callTextModel(systemPrompt, userPrompt, true)
   let parsed: any
   try {
     parsed = JSON.parse(aiRes.content)
@@ -221,15 +327,15 @@ export async function scoreTopic(title: string, summary: string): Promise<Scorin
 
 /**
  * generateDraft
- * Generates post draft using LLM.
- * Fails closed on any API error or missing content. ZERO synthetic copy fabrication.
+ * Generates post text copy via Text Model (google/gemini-3.5-flash) and visual asset via Image Model (google/gemini-3.1-flash-image) when required.
+ * Fails closed on any error.
  */
 export async function generateDraft(title: string, summary: string, pillar = 'Educational', format = 'carousel', personalInput = ''): Promise<DraftResult> {
   const normPillar = normalizePillar(pillar)
-  const systemPrompt = `You are an expert fashion-tech content creator for Pranavi (Positioning: Code × Craft × Contemporary Design). Generate a high-quality ${format} draft on pillar '${normPillar}'. Return JSON with keys: title, hook, full_content, pillar, format.`
+  const systemPrompt = `You are an expert fashion-tech content creator for Pranavi (Positioning: Code × Craft × Contemporary Design). Generate a high-quality ${format} draft on pillar '${normPillar}'. Return JSON with keys: title, hook, full_content, pillar, format, image_prompt (a detailed prompt for fashion-tech visual generator).`
   const userPrompt = JSON.stringify({ title, summary, pillar: normPillar, format, personalInput })
 
-  const aiRes = await callModel(systemPrompt, userPrompt, true)
+  const aiRes = await callTextModel(systemPrompt, userPrompt, true)
   let data: any
   try {
     data = JSON.parse(aiRes.content)
@@ -241,26 +347,57 @@ export async function generateDraft(title: string, summary: string, pillar = 'Ed
     throw new Error('DRAFT_GENERATION_UNAVAILABLE: AI draft output incomplete or missing required title/hook/full_content fields')
   }
 
+  const isImageRequired = ['single_image', 'image', 'graphic', 'editorial_graphic'].includes(format.toLowerCase())
+  const isTextOnly = ['text', 'text_only', 'article'].includes(format.toLowerCase())
+
+  let imageResult: { image_url?: string; image_provider?: string; image_model?: string; image_prompt?: string } = {}
+  let imageStatus: DraftResult['image_generation_status'] = 'none'
+
+  const imagePromptText = data.image_prompt || `Editorial fashion-tech graphic: ${data.title}. Aesthetic: Code x Craft x Contemporary Design.`
+
+  if (isImageRequired) {
+    try {
+      imageResult = await generateImage(imagePromptText)
+      imageStatus = 'completed'
+    } catch (err) {
+      throw new Error(`IMAGE_GENERATION_UNAVAILABLE: Mandatory image generation failed for single-image format: ${(err as Error).message}`)
+    }
+  } else if (isTextOnly) {
+    imageStatus = 'skipped'
+  } else {
+    // Optional image attempt for carousels / standard posts
+    try {
+      imageResult = await generateImage(imagePromptText)
+      imageStatus = 'completed'
+    } catch {
+      imageStatus = 'skipped'
+    }
+  }
+
   return {
     title: String(data.title).trim(),
     hook: String(data.hook).trim(),
     full_content: String(data.full_content).trim(),
     pillar: normalizePillar(data.pillar || normPillar),
     format: String(data.format || format).trim(),
-    provider: aiRes.provider,
-    model: aiRes.model
+    text_provider: aiRes.provider,
+    text_model: aiRes.model,
+    image_provider: imageResult.image_provider || (imageStatus === 'completed' ? 'openrouter' : undefined),
+    image_model: imageResult.image_model || (imageStatus === 'completed' ? (process.env.OPENROUTER_IMAGE_MODEL || 'google/gemini-3.1-flash-image') : undefined),
+    image_url: imageResult.image_url,
+    image_prompt: imagePromptText,
+    image_generation_status: imageStatus
   }
 }
 
 /**
  * generateCarouselOutline
- * Fails closed on any API error or invalid response.
  */
 export async function generateCarouselOutline(postBody: string, pillar = 'Educational', topicSummary = '', hookSelected = ''): Promise<any> {
   const systemPrompt = 'Generate a 5-slide carousel outline for LinkedIn. Return JSON object with title, slides array (with slide_no, headline, text), cta.'
   const userPrompt = JSON.stringify({ postBody, pillar: normalizePillar(pillar), topicSummary, hookSelected })
 
-  const aiRes = await callModel(systemPrompt, userPrompt, true)
+  const aiRes = await callTextModel(systemPrompt, userPrompt, true)
   let data: any
   try {
     data = JSON.parse(aiRes.content)
@@ -277,13 +414,12 @@ export async function generateCarouselOutline(postBody: string, pillar = 'Educat
 
 /**
  * generateWeeklyReview
- * Fails closed on any API error or invalid response.
  */
 export async function generateWeeklyReview(metricsData: any, brandProfile = {}): Promise<any> {
   const systemPrompt = 'Analyze weekly publishing metrics and generate insights. Return JSON object with summary, top_performing_pillar, recommendations array.'
   const userPrompt = JSON.stringify({ metricsData, brandProfile })
 
-  const aiRes = await callModel(systemPrompt, userPrompt, true)
+  const aiRes = await callTextModel(systemPrompt, userPrompt, true)
   let data: any
   try {
     data = JSON.parse(aiRes.content)
