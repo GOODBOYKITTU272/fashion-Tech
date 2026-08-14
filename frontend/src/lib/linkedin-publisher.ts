@@ -2,6 +2,7 @@ import { getSupabaseAdmin } from './supabase-admin'
 import { canPublishScheduledPost } from './publishing-gate'
 import { buildLinkedInPostPayload, LinkedInNormalizedPayload } from './linkedin-payload'
 import { DryRunLinkedInTransport, TransportPublishResult } from './linkedin-transport'
+import { ZernioLinkedInTransport } from './zernio-transport'
 import { logAutomationEvent } from './automation-events'
 
 export interface PublishScheduledPostParams {
@@ -12,18 +13,20 @@ export interface PublishScheduledPostParams {
 
 export interface PublishResult {
   success: boolean
-  status: 'DRY_RUN_SUCCESS' | 'BLOCKED' | 'DUPLICATE_ATTEMPT_BLOCKED' | 'CONTENT_PAYLOAD_INCOMPLETE' | 'MEDIA_NOT_READY' | 'ERROR'
+  status: 'DRY_RUN_SUCCESS' | 'LIVE_SUCCESS' | 'BLOCKED' | 'DUPLICATE_ATTEMPT_BLOCKED' | 'CONTENT_PAYLOAD_INCOMPLETE' | 'MEDIA_NOT_READY' | 'ERROR'
   reason_code?: string
   reasons?: string[]
   idempotency_key?: string
   payload_preview?: LinkedInNormalizedPayload
+  published_post_urn?: string
+  published_post_url?: string
   transport_result?: TransportPublishResult
 }
 
 /**
  * publishScheduledPost
  * Master server-side publisher orchestrator.
- * Evaluates real gate, checks idempotency, prepares payload, persists publishing_attempts, and executes DRY-RUN transport ONLY.
+ * Evaluates real gate, checks idempotency, prepares payload, persists publishing_attempts, and executes live/dry-run transport.
  */
 export async function publishScheduledPost(params: PublishScheduledPostParams): Promise<PublishResult> {
   const { userId, calendarId, dryRun = true } = params
@@ -70,14 +73,14 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
     if (calItem.draft_id) {
       const { data: draft } = await admin
         .from('drafts')
-        .select('title, full_content, quality_gate_status, confidence_score, media_url, pdf_url')
+        .select('title, full_content, quality_gate_status, confidence_score, image_url, pdf_url')
         .eq('id', calItem.draft_id)
         .single()
 
       if (draft) {
         title = draft.title || title
         bodyText = draft.full_content || ''
-        mediaUrl = draft.media_url || null
+        mediaUrl = draft.image_url || null
         pdfUrl = draft.pdf_url || null
         confidenceScore = draft.confidence_score ?? confidenceScore
         qualityStatus = draft.quality_gate_status || qualityStatus
@@ -168,7 +171,7 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
         request_type: payloadResult.payload.request_type,
         status: 'BLOCKED',
         idempotency_key: idempotencyKey,
-        dry_run: true,
+        dry_run: dryRun,
         error_code: gateResult.reason_code,
         failure_reason: gateResult.reasons[0],
         request_metadata: payloadResult.payload,
@@ -180,7 +183,7 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
         userId,
         eventType: 'PUBLISH_GATE_BLOCKED',
         severity: 'info',
-        message: `Publisher dry-run blocked by gate: ${gateResult.reason_code}`
+        message: `Publisher execution blocked by gate: ${gateResult.reason_code}`
       })
 
       return {
@@ -193,37 +196,56 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
       }
     }
 
-    // 6. Execute Dry-Run Transport ONLY (Zero HTTP calls to LinkedIn)
-    const transport = new DryRunLinkedInTransport()
-    const transportResult = await transport.publishPayload(payloadResult.payload)
+    // 6. Execute Transport (DryRun vs Zernio Live)
+    let transportResult: TransportPublishResult
 
-    // 7. Persist Dry-Run Attempt in public.publishing_attempts
+    if (dryRun) {
+      const transport = new DryRunLinkedInTransport()
+      transportResult = await transport.publishPayload(payloadResult.payload)
+    } else {
+      const transport = new ZernioLinkedInTransport()
+      transportResult = await transport.publishPayload(payloadResult.payload)
+    }
+
+    const finalStatus = dryRun ? 'DRY_RUN_SUCCESS' : 'LIVE_SUCCESS'
+
+    // 7. Persist Attempt in public.publishing_attempts
     await admin.from('publishing_attempts').insert({
       user_id: userId,
       calendar_id: calendarId,
       attempt_number: 1,
       request_type: payloadResult.payload.request_type,
-      status: 'DRY_RUN_SUCCESS',
+      status: finalStatus,
       idempotency_key: idempotencyKey,
-      dry_run: true,
+      dry_run: dryRun,
       request_metadata: payloadResult.payload,
       response_metadata: transportResult.response_metadata,
       started_at: new Date().toISOString(),
       completed_at: new Date().toISOString()
     })
 
+    // 8. Update content_calendar status if live success
+    if (!dryRun && transportResult.status === 'LIVE_SUCCESS') {
+      await admin.from('content_calendar').update({
+        status: 'published',
+        published_at: new Date().toISOString()
+      }).eq('id', calendarId)
+    }
+
     await logAutomationEvent({
       userId,
-      eventType: 'PUBLISH_DRY_RUN_SUCCESS',
+      eventType: dryRun ? 'PUBLISH_DRY_RUN_SUCCESS' : 'PUBLISH_LIVE_SUCCESS',
       severity: 'info',
-      message: `Successfully executed W6 publisher dry-run for post: ${title}`
+      message: `Successfully executed W6 publisher (${dryRun ? 'dry-run' : 'LIVE'}) for post: ${title}`
     })
 
     return {
       success: true,
-      status: 'DRY_RUN_SUCCESS',
+      status: finalStatus,
       idempotency_key: idempotencyKey,
       payload_preview: payloadResult.payload,
+      published_post_urn: transportResult.published_post_urn,
+      published_post_url: transportResult.response_metadata?.published_url,
       transport_result: transportResult
     }
   } catch (err: any) {
@@ -231,7 +253,7 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
     return {
       success: false,
       status: 'ERROR',
-      reason_code: 'UNKNOWN_ERROR',
+      reason_code: err.message?.startsWith('ZERNIO_') ? 'ZERNIO_PUBLISH_FAILED' : 'UNKNOWN_ERROR',
       reasons: [err.message || 'An unhandled exception occurred during W6 publisher execution.']
     }
   }

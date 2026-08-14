@@ -12,6 +12,7 @@ export type AutomationEventType =
   | 'MEDIA_NOT_READY'
   | 'PUBLISH_GATE_BLOCKED'
   | 'PUBLISH_DRY_RUN_SUCCESS'
+  | 'PUBLISH_LIVE_SUCCESS'
 
 export type AutomationEventSeverity = 'info' | 'warning' | 'critical'
 
