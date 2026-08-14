@@ -14,6 +14,19 @@ export interface TimeResolutionParams {
   pillar: string
 }
 
+export interface WeekdaySlotTemplate {
+  dayOffset: number
+  dayName: string
+  pillarTarget: string
+}
+
+export const DEFAULT_WEEKDAY_POLICY: WeekdaySlotTemplate[] = [
+  { dayOffset: 0, dayName: 'Mon', pillarTarget: 'Educational' },
+  { dayOffset: 1, dayName: 'Tue', pillarTarget: 'Storytelling' },
+  { dayOffset: 3, dayName: 'Thu', pillarTarget: 'Educational' },
+  { dayOffset: 4, dayName: 'Fri', pillarTarget: 'Soft Selling' },
+]
+
 export interface SchedulerRunResult {
   scheduled_count: number
   slots_filled: Array<{
@@ -34,11 +47,11 @@ export interface SchedulerRunResult {
 /**
  * selectBaselinePostingTime
  * Resolves posting time recommendation based on configured baseline policy.
- * Prepares scheduler for future dynamic analytics optimization in W7 without breaking schema contracts.
+ * Returns null if process.env.SCHEDULER_BASELINE_TIME is unset. ZERO inline hardcoded time fallbacks.
  */
 export function selectBaselinePostingTime(params: TimeResolutionParams): SchedulingRecommendation {
   const { date } = params
-  const configuredBaseline = process.env.SCHEDULER_BASELINE_TIME || '14:00:00'
+  const configuredBaseline = process.env.SCHEDULER_BASELINE_TIME?.trim() || null
 
   return {
     date,
@@ -50,9 +63,12 @@ export function selectBaselinePostingTime(params: TimeResolutionParams): Schedul
 /**
  * runWeeklyScheduler
  * Master W5 weekly scheduling orchestrator.
- * Enforces 4 posts/week cadence (2 Educational, 1 Storytelling, 1 Soft Selling), weekday-first slot allocation, future-date safety, and strict W4 quality gate checks.
+ * Enforces 4 posts/week cadence (2 Educational, 1 Storytelling, 1 Soft Selling), configurable weekday-first slot policy, future-date safety, and strict W4 quality gate checks.
  */
-export async function runWeeklyScheduler(userId: string): Promise<SchedulerRunResult> {
+export async function runWeeklyScheduler(
+  userId: string,
+  slotPolicy: WeekdaySlotTemplate[] = DEFAULT_WEEKDAY_POLICY
+): Promise<SchedulerRunResult> {
   if (!userId) {
     throw new Error('SCHEDULER_BLOCKED: userId is required for weekly scheduler')
   }
@@ -71,14 +87,6 @@ export async function runWeeklyScheduler(userId: string): Promise<SchedulerRunRe
   const minConfidence = autoState.min_confidence_score ?? 70
   const now = new Date()
   const todayStr = now.toISOString().split('T')[0]
-
-  // Weekday-first slot policy (Mon, Tue, Thu, Fri) — Saturday/Sunday are excluded from required slots
-  const weekdaySlotTemplates = [
-    { dayOffset: 0, dayName: 'Mon', pillarTarget: 'Educational' },
-    { dayOffset: 1, dayName: 'Tue', pillarTarget: 'Storytelling' },
-    { dayOffset: 3, dayName: 'Thu', pillarTarget: 'Educational' },
-    { dayOffset: 4, dayName: 'Fri', pillarTarget: 'Soft Selling' },
-  ]
 
   // Determine current Monday
   const monday = new Date(now)
@@ -119,7 +127,7 @@ export async function runWeeklyScheduler(userId: string): Promise<SchedulerRunRe
   if (candidates && candidates.length > 0) {
     let candidateIndex = 0
 
-    for (const slot of weekdaySlotTemplates) {
+    for (const slot of slotPolicy) {
       if (candidateIndex >= candidates.length) break
 
       const candidate = candidates[candidateIndex]
@@ -135,7 +143,7 @@ export async function runWeeklyScheduler(userId: string): Promise<SchedulerRunRe
         formattedDate = slotDate.toISOString().split('T')[0]
       }
 
-      // Resolve time recommendation using baseline resolver (optimization ready)
+      // Resolve time recommendation using baseline resolver (returns env value or null)
       const timeRec = selectBaselinePostingTime({
         targetAudience: ['USA', 'UK'],
         date: formattedDate,
