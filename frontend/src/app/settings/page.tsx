@@ -22,9 +22,19 @@ export default function SettingsPage() {
   const [memberUrn, setMemberUrn] = useState<string | null>(null)
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
   const [lastVerified, setLastVerified] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  // Fetch real persisted status on mount
+  // Fetch real persisted status and parse URL search params on mount
   useEffect(() => {
+    // Read query params for OAuth redirect errors
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const err = params.get('error')
+      if (err) {
+        setErrorMessage(decodeURIComponent(err))
+      }
+    }
+
     async function fetchStatus() {
       try {
         const res = await fetch('/api/linkedin/status')
@@ -65,7 +75,6 @@ export default function SettingsPage() {
         throw new Error(errData.error || 'Database save failed')
       }
 
-      // Update state after confirmed DB persistence
       setAutoMode(newAutoMode)
       setPausePublishing(newPause)
     } catch (err: any) {
@@ -84,7 +93,18 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* AUTOMATION CONTROL SECTION WITH DB PERSISTENCE */}
+      {/* ERROR BANNER IF ANY */}
+      {errorMessage && (
+        <div className="card card-pad-sm" style={{ background: 'var(--red-dim)', borderColor: 'rgba(248,113,113,0.4)', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <p style={{ color: 'var(--red)', fontWeight: 600, fontSize: '0.85rem' }}>⚠️ LinkedIn Integration Notice</p>
+            <p style={{ color: 'var(--text-2)', fontSize: '0.8rem', marginTop: '0.2rem' }}>{errorMessage}</p>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => setErrorMessage(null)}>Dismiss</button>
+        </div>
+      )}
+
+      {/* AUTOMATION CONTROL SECTION */}
       <div className="card card-pad" style={{ marginBottom: '1.5rem', borderColor: pausePublishing ? 'var(--red)' : 'var(--border)' }}>
         <h2 className="section-title">⚡ Automation Controls</h2>
         
@@ -181,7 +201,8 @@ export default function SettingsPage() {
         </div>
 
         <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem' }}>
-          <a href="/api/auth/linkedin/callback" className="btn btn-primary btn-sm">
+          {/* CORRECTED LINK: Points to /api/auth/linkedin/login to initiate OAuth flow */}
+          <a href="/api/auth/linkedin/login" className="btn btn-primary btn-sm">
             {integrationStatus === 'CONNECTED' ? '🔄 Reconnect Account' : '🔑 Connect LinkedIn Account'}
           </a>
         </div>
