@@ -40,6 +40,8 @@ export default function TodayPage() {
   const [loading, setLoading] = useState(true)
   const [dryRunLoading, setDryRunLoading] = useState(false)
   const [dryRunResult, setDryRunResult] = useState<any>(null)
+  const [ingestLoading, setIngestLoading] = useState(false)
+  const [ingestResult, setIngestResult] = useState<any>(null)
 
   useEffect(() => {
     async function loadStatus() {
@@ -83,6 +85,26 @@ export default function TodayPage() {
     }
   }
 
+  const handleTriggerIngestion = async () => {
+    setIngestLoading(true)
+    setIngestResult(null)
+    try {
+      const res = await authenticatedFetch('/api/signals/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      const json = await res.json()
+      setIngestResult(json)
+    } catch (err: any) {
+      setIngestResult({
+        success: false,
+        errors: [err.message || 'Ingestion request failed']
+      })
+    } finally {
+      setIngestLoading(false)
+    }
+  }
+
   const autoState = data?.automation
   const linkedinState = data?.linkedin
   const nextPost = data?.next_post
@@ -102,8 +124,12 @@ export default function TodayPage() {
           <Link href="/settings" className="btn btn-ghost btn-sm">
             ⚙️ Manage OAuth
           </Link>
-          <button className="btn btn-primary btn-sm">
-            🔄 Sync Sources
+          <button 
+            disabled={ingestLoading}
+            className="btn btn-primary btn-sm"
+            onClick={handleTriggerIngestion}
+          >
+            {ingestLoading ? 'Fetching Signals...' : '👁️ Run Agent Reach W1'}
           </button>
         </div>
       </div>
@@ -111,7 +137,7 @@ export default function TodayPage() {
       {/* REAL AUTOMATION & INTEGRATION CONTROL BANNER */}
       <div className="card card-pad-sm" style={{ marginBottom: '1.5rem', background: 'rgba(255,255,255,0.02)' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <span className={`badge ${autoState?.auto_mode_enabled ? 'badge-green' : 'badge-gray'}`}>
               AUTO MODE: {autoState?.auto_mode_enabled ? 'ON' : 'OFF'}
             </span>
@@ -124,6 +150,9 @@ export default function TodayPage() {
             }`}>
               LINKEDIN: {linkedinState?.integration_status || 'WAITING_FOR_API_ACCESS'}
             </span>
+            <span className="badge badge-blue">
+              RESEARCH CONNECTOR: AGENT REACH (LOCAL READY)
+            </span>
           </div>
 
           <div style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
@@ -131,6 +160,18 @@ export default function TodayPage() {
           </div>
         </div>
       </div>
+
+      {/* INGESTION RESULT BANNER */}
+      {ingestResult && (
+        <div className="card card-pad-sm" style={{ marginBottom: '1.5rem', background: ingestResult.success ? 'var(--green-dim)' : 'var(--accent-dim)', borderColor: 'var(--border)' }}>
+          <p style={{ fontWeight: 600, fontSize: '0.85rem', color: ingestResult.success ? 'var(--green)' : 'var(--accent)' }}>
+            👁️ Agent Reach W1 Ingestion Result: {ingestResult.success ? 'Success' : 'Partial / Failed'}
+          </p>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-2)', marginTop: '0.25rem' }}>
+            Discovered: <strong>{ingestResult.signals_discovered ?? 0}</strong> | Inserted: <strong>{ingestResult.signals_inserted ?? 0}</strong> | Deduplicated: <strong>{ingestResult.signals_deduplicated ?? 0}</strong>
+          </p>
+        </div>
+      )}
 
       {/* REAL NEXT POST & PUBLISHING ELIGIBILITY STATUS CARD */}
       <div className="card card-pad" style={{ marginBottom: '1.5rem', borderColor: gateResult?.allowed ? 'var(--green)' : 'var(--border)' }}>
@@ -236,7 +277,7 @@ export default function TodayPage() {
           No new unprocessed research signals
         </h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-2)', maxWidth: '420px', margin: '0 auto' }}>
-          The daily research workflow (W1/W2) runs automatically at 2:00 AM. Scored opportunities will appear here each morning.
+          Agent Reach (Local Microservice) acquires safe fashion technology, Indian craftsmanship, and textile signals into Supabase. Click <strong>Run Agent Reach W1</strong> to trigger ingestion.
         </p>
       </div>
     </div>
