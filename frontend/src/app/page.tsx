@@ -15,12 +15,15 @@ interface UpcomingPost {
   pillar: string
   format: string
   quality_gate_status: string
+  confidence_score: number | null
   image_status: string
   image_url: string | null
   publishing_status: string
   source?: 'internal' | 'linkedin_native' | 'zernio'
   external_platform?: string | null
   external_status?: string | null
+  external_timezone?: string | null
+  external_scheduled_at?: string | null
   provenance: string
 }
 
@@ -351,34 +354,35 @@ export default function TodayPage() {
 
         {upcomingPosts.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {upcomingPosts.map(post => (
-              <div key={post.id} style={{ background: '#18181b', padding: '0.85rem', borderRadius: '6px', border: post.source === 'linkedin_native' ? '1px solid #818cf8' : '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                <div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.25rem' }}>
-                    <span className={`badge ${post.source === 'linkedin_native' ? 'badge-primary' : 'badge-blue'}`} style={{ fontSize: '0.7rem' }}>
-                      {post.source === 'linkedin_native' ? 'LINKEDIN NATIVE' : 'INTERNAL ENGINE'}
-                    </span>
-                    <span className="badge badge-gray" style={{ fontSize: '0.7rem' }}>{post.pillar} · {post.format}</span>
+            {upcomingPosts.map(post => {
+              const isNative = post.source === 'linkedin_native'
+              return (
+                <div key={post.id} style={{ background: '#18181b', padding: '0.85rem', borderRadius: '6px', border: isNative ? '1px solid #818cf8' : '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div style={{ flex: 1, minWidth: '260px' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.25rem' }}>
+                      <span className={`badge ${isNative ? 'badge-primary' : 'badge-blue'}`} style={{ fontSize: '0.7rem' }}>
+                        {isNative ? 'LINKEDIN NATIVE' : 'INTERNAL ENGINE'}
+                      </span>
+                      {isNative && <span className="badge badge-gray" style={{ fontSize: '0.7rem' }}>MANUAL IMPORT</span>}
+                      <span className="badge badge-gray" style={{ fontSize: '0.7rem' }}>{post.pillar} · {post.format}</span>
+                    </div>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 600, margin: '0.2rem 0' }}>{post.title}</h3>
+                    <p style={{ fontSize: '0.775rem', color: 'var(--text-3)', margin: 0 }}>
+                      Scheduled: <strong>{post.planned_date} at 8:30 PM IST</strong> | Draft ID: <code>{post.draft_id || 'N/A'}</code>
+                    </p>
                   </div>
-                  <h3 style={{ fontSize: '0.95rem', fontWeight: 600, margin: '0.2rem 0' }}>{post.title}</h3>
-                  <p style={{ fontSize: '0.775rem', color: 'var(--text-3)', margin: 0 }}>
-                    Planned Date: <strong>{post.planned_date}</strong> {post.planned_time ? `at ${post.planned_time}` : ''} | Draft ID: <code>{post.draft_id || 'N/A'}</code>
-                  </p>
-                </div>
 
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <span className={`badge ${post.quality_gate_status === 'passed' ? 'badge-green' : 'badge-yellow'}`}>
-                    QG: {post.quality_gate_status.toUpperCase()}
-                  </span>
-                  <span className={`badge ${post.image_status === 'completed' ? 'badge-green' : 'badge-gray'}`}>
-                    IMG: {post.image_status.toUpperCase()}
-                  </span>
-                  <span className={`badge ${post.publishing_status === 'published' ? 'badge-green' : 'badge-blue'}`}>
-                    {post.publishing_status.toUpperCase()}
-                  </span>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <span className={`badge ${isNative ? 'badge-gray' : (post.quality_gate_status === 'PASSED' ? 'badge-green' : 'badge-yellow')}`}>
+                      Quality Gate: {isNative ? 'NOT EVALUATED' : post.quality_gate_status}
+                    </span>
+                    <span className={`badge ${post.publishing_status === 'published' ? 'badge-green' : 'badge-blue'}`}>
+                      {post.publishing_status.toUpperCase()}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         ) : (
           <p style={{ fontSize: '0.85rem', color: 'var(--text-3)', textAlign: 'center', margin: '1rem 0' }}>

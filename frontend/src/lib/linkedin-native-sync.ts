@@ -1,99 +1,121 @@
 import { getSupabaseAdmin } from './supabase-admin'
+import crypto from 'crypto'
 
-export interface KnownLinkedInPost {
+export interface KnownLinkedInNativePost {
   title: string
-  content: string
+  content_preview: string
   planned_date: string
   planned_time: string
+  external_scheduled_at_utc: string
+  external_timezone: string
   pillar: string
   format: string
   source: 'linkedin_native'
 }
 
-export const KNOWN_LINKEDIN_NATIVE_POSTS: KnownLinkedInPost[] = [
+export const TRUTHFUL_LINKEDIN_NATIVE_POSTS: KnownLinkedInNativePost[] = [
   {
     title: 'From code to craft.',
-    content: 'From code to craft. Exploring how software architecture and traditional Indian textile weaving converge in contemporary fashion design.',
+    content_preview: 'From code to craft.',
     planned_date: '2026-08-14',
     planned_time: '20:30:00',
-    pillar: 'Fashion Tech & Philosophy',
+    external_scheduled_at_utc: '2026-08-14T15:00:00Z',
+    external_timezone: 'Asia/Kolkata',
+    pillar: 'Educational',
     format: 'single_image',
     source: 'linkedin_native'
   },
   {
-    title: 'When I moved from Computer Science into Fashion Design...',
-    content: 'When I moved from Computer Science into Fashion Design, everyone thought it was a complete pivot. But code and craft share the exact same foundation: logic, patterns, and precision.',
+    title: 'When I moved from Computer Science into Fashion Design, I thought I was entering a completely different world.',
+    content_preview: 'When I moved from Computer Science into Fashion Design, I thought I was entering a completely different world.',
     planned_date: '2026-08-17',
     planned_time: '20:30:00',
-    pillar: 'Personal Journey',
-    format: 'thought_leadership',
+    external_scheduled_at_utc: '2026-08-17T15:00:00Z',
+    external_timezone: 'Asia/Kolkata',
+    pillar: 'Educational',
+    format: 'single_image',
     source: 'linkedin_native'
   },
   {
-    title: 'One week into my M.Des. in Fashion Design...',
-    content: 'One week into my M.Des. in Fashion Design: 3 key takeaways on blending digital 3D garment prototyping (CLO 3D) with heritage Indian craftsmanship.',
+    title: 'One week into my M.Des. in Fashion Design, I got the chance to volunteer at a fashion event.',
+    content_preview: 'One week into my M.Des. in Fashion Design, I got the chance to volunteer at a fashion event.',
     planned_date: '2026-08-18',
     planned_time: '20:30:00',
-    pillar: 'Academic & Design Insights',
-    format: 'carousel',
+    external_scheduled_at_utc: '2026-08-18T15:00:00Z',
+    external_timezone: 'Asia/Kolkata',
+    pillar: 'Educational',
+    format: 'single_image',
     source: 'linkedin_native'
   }
 ]
 
-export async function importKnownLinkedInNativePosts(userId: string): Promise<{ importedCount: number; mergedCount: number; errors: string[] }> {
-  if (!userId) return { importedCount: 0, mergedCount: 0, errors: ['User ID is required'] }
+export function generateExternalFingerprint(
+  userId: string,
+  platform: string,
+  contentPreview: string,
+  scheduledAtUtc: string
+): string {
+  const norm = contentPreview.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+  return crypto.createHash('sha256').update(`${userId}:${platform}:${norm}:${scheduledAtUtc}`).digest('hex')
+}
+
+export async function importKnownLinkedInNativePosts(userId: string): Promise<{ importedCount: number; updatedCount: number; errors: string[] }> {
+  if (!userId) return { importedCount: 0, updatedCount: 0, errors: ['User ID is required'] }
 
   const admin = getSupabaseAdmin()
   let importedCount = 0
-  let mergedCount = 0
+  let updatedCount = 0
   const errors: string[] = []
 
-  for (const post of KNOWN_LINKEDIN_NATIVE_POSTS) {
+  for (const post of TRUTHFUL_LINKEDIN_NATIVE_POSTS) {
     try {
-      // 1. Deduplication check in content_calendar for existing date or title match
-      const { data: existingCalendar } = await admin
+      const fingerprint = generateExternalFingerprint(userId, 'linkedin', post.content_preview, post.external_scheduled_at_utc)
+
+      // 1. Check for exact fingerprint match in content_calendar
+      const { data: existingFingerprint } = await admin
         .from('content_calendar')
-        .select('id, draft_id, source')
-        .eq('user_id', userId)
-        .eq('planned_date', post.planned_date)
+        .select('id')
+        .eq('external_fingerprint', fingerprint)
         .limit(1)
 
-      if (existingCalendar && existingCalendar.length > 0) {
-        // Merge metadata if row exists
-        const existingRow = existingCalendar[0]
+      if (existingFingerprint && existingFingerprint.length > 0) {
+        // Update external metadata strictly for matching fingerprint
         await admin.from('content_calendar').update({
-          source: post.source,
+          source: 'linkedin_native',
           external_platform: 'linkedin',
           external_post_type: 'scheduled',
           external_status: 'scheduled',
-          external_scheduled_at: `${post.planned_date}T${post.planned_time}Z`
-        }).eq('id', existingRow.id)
-        mergedCount++
+          external_timezone: post.external_timezone,
+          external_scheduled_at: post.external_scheduled_at_utc,
+          quality_gate_status: null,
+          confidence_score: null
+        }).eq('id', existingFingerprint[0].id)
+
+        updatedCount++
         continue
       }
 
-      // 2. Create underlying Draft row so post has valid draft_id
+      // 2. Create external draft snapshot (non-AI snapshot)
       const { data: draft, error: draftErr } = await admin.from('drafts').insert({
         user_id: userId,
         title: post.title,
-        hook: post.title,
-        caption: post.content,
+        hook: post.content_preview,
+        full_content: post.content_preview,
         pillar: post.pillar,
         format: post.format,
-        status: 'approved',
-        quality_gate_status: 'passed',
-        confidence_score: 90,
+        quality_gate_status: null,
+        confidence_score: null,
         text_provider: 'linkedin_native',
-        text_model: 'manual_import',
+        text_model: 'external_snapshot',
         image_generation_status: 'none'
       }).select('id').single()
 
       if (draftErr || !draft) {
-        errors.push(`Failed to create draft for ${post.title}: ${draftErr?.message}`)
+        errors.push(`Failed to create external draft for ${post.title}: ${draftErr?.message}`)
         continue
       }
 
-      // 3. Insert into content_calendar
+      // 3. Insert new external row into content_calendar
       const { error: calendarErr } = await admin.from('content_calendar').insert({
         user_id: userId,
         draft_id: draft.id,
@@ -102,17 +124,23 @@ export async function importKnownLinkedInNativePosts(userId: string): Promise<{ 
         pillar: post.pillar,
         format: post.format,
         status: 'scheduled',
-        quality_gate_status: 'passed',
-        confidence_score: 90,
-        source: post.source,
+        quality_gate_status: null,
+        confidence_score: null,
+        source: 'linkedin_native',
         external_platform: 'linkedin',
         external_post_type: 'scheduled',
         external_status: 'scheduled',
-        external_scheduled_at: `${post.planned_date}T${post.planned_time}Z`
+        external_timezone: post.external_timezone,
+        external_scheduled_at: post.external_scheduled_at_utc,
+        external_fingerprint: fingerprint
       })
 
       if (calendarErr) {
-        errors.push(`Failed to insert calendar row for ${post.title}: ${calendarErr.message}`)
+        if (calendarErr.code === '23505') {
+          updatedCount++
+        } else {
+          errors.push(`Failed to insert calendar row for ${post.title}: ${calendarErr.message}`)
+        }
       } else {
         importedCount++
       }
@@ -121,5 +149,5 @@ export async function importKnownLinkedInNativePosts(userId: string): Promise<{ 
     }
   }
 
-  return { importedCount, mergedCount, errors }
+  return { importedCount, updatedCount, errors }
 }

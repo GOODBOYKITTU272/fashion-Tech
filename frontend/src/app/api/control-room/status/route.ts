@@ -5,7 +5,6 @@ import { getLinkedInIntegrationState } from '@/lib/linkedin-control'
 import { getNextScheduledPost } from '@/lib/next-post-control'
 import { canPublishScheduledPost } from '@/lib/publishing-gate'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { importKnownLinkedInNativePosts } from '@/lib/linkedin-native-sync'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,9 +18,7 @@ export async function GET(req: Request) {
     const userId = auth.userId
     const admin = getSupabaseAdmin()
 
-    // Ensure known native posts exist in calendar (idempotent deduplicated merge)
-    await importKnownLinkedInNativePosts(userId)
-
+    // Pure READ ONLY operational state query
     const [
       automationState,
       linkedinState,
@@ -34,7 +31,7 @@ export async function GET(req: Request) {
       getLinkedInIntegrationState(userId),
       getNextScheduledPost(userId),
       admin.from('pipeline_runs').select('*').eq('user_id', userId).order('started_at', { ascending: false }).limit(5),
-      admin.from('content_calendar').select('id, draft_id, planned_date, planned_time, pillar, format, status, quality_gate_status, source, external_platform, external_status, created_at').eq('user_id', userId).order('planned_date', { ascending: true }).limit(10),
+      admin.from('content_calendar').select('id, draft_id, planned_date, planned_time, pillar, format, status, quality_gate_status, confidence_score, source, external_platform, external_status, external_timezone, external_scheduled_at, created_at').eq('user_id', userId).order('planned_date', { ascending: true }).limit(10),
       admin.from('research_signals').select('id, source_name, url, title, category, platform, query_used, relevance_status, relevance_score, topic_family, relevance_reason, captured_at, processed').order('captured_at', { ascending: false }).limit(10)
     ])
 
@@ -54,16 +51,19 @@ export async function GET(req: Request) {
         draft_id: p.draft_id,
         title: draft?.title || `${p.pillar} Post`,
         planned_date: p.planned_date,
-        planned_time: p.planned_time || '20:30:00',
+        planned_time: p.planned_time ? `${p.planned_time} IST` : '8:30 PM IST',
         pillar: p.pillar,
         format: p.format,
-        quality_gate_status: p.quality_gate_status || 'passed',
+        quality_gate_status: p.quality_gate_status ? p.quality_gate_status.toUpperCase() : 'NOT EVALUATED',
+        confidence_score: p.confidence_score,
         image_status: draft?.image_generation_status || 'none',
         image_url: draft?.image_url || null,
         publishing_status: p.status,
         source: p.source || 'internal',
         external_platform: p.external_platform || null,
         external_status: p.external_status || null,
+        external_timezone: p.external_timezone || 'Asia/Kolkata',
+        external_scheduled_at: p.external_scheduled_at || null,
         provenance: p.source === 'linkedin_native' ? 'LINKEDIN_NATIVE' : 'INTERNAL'
       }
     })
