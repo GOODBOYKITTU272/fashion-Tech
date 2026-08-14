@@ -18,7 +18,10 @@ interface UpcomingPost {
   image_status: string
   image_url: string | null
   publishing_status: string
-  provenance: 'REAL' | 'TEST' | 'UNKNOWN'
+  source?: 'internal' | 'linkedin_native' | 'zernio'
+  external_platform?: string | null
+  external_status?: string | null
+  provenance: string
 }
 
 interface ResearchSignal {
@@ -100,6 +103,7 @@ interface ControlRoomStatusData {
   }
   upcoming_posts: UpcomingPost[]
   recent_signals: ResearchSignal[]
+  sync_mode?: string
   production_engine: ProductionEngine | null
 }
 
@@ -336,17 +340,24 @@ export default function TodayPage() {
 
       {/* 2. UPCOMING LINKEDIN POSTS */}
       <div className="card card-pad" style={{ marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span>📅</span> UPCOMING LINKEDIN POSTS
-        </h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>📅</span> UPCOMING LINKEDIN POSTS
+          </h2>
+          <span className="badge badge-gray" style={{ fontSize: '0.7rem' }}>
+            SYNC MODE: {data?.sync_mode || 'MANUAL_IMPORT'}
+          </span>
+        </div>
 
         {upcomingPosts.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {upcomingPosts.map(post => (
-              <div key={post.id} style={{ background: '#18181b', padding: '0.85rem', borderRadius: '6px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div key={post.id} style={{ background: '#18181b', padding: '0.85rem', borderRadius: '6px', border: post.source === 'linkedin_native' ? '1px solid #818cf8' : '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
                 <div>
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.25rem' }}>
-                    <span className="badge badge-blue" style={{ fontSize: '0.7rem' }}>{post.provenance} PROVENANCE</span>
+                    <span className={`badge ${post.source === 'linkedin_native' ? 'badge-primary' : 'badge-blue'}`} style={{ fontSize: '0.7rem' }}>
+                      {post.source === 'linkedin_native' ? 'LINKEDIN NATIVE' : 'INTERNAL ENGINE'}
+                    </span>
                     <span className="badge badge-gray" style={{ fontSize: '0.7rem' }}>{post.pillar} · {post.format}</span>
                   </div>
                   <h3 style={{ fontSize: '0.95rem', fontWeight: 600, margin: '0.2rem 0' }}>{post.title}</h3>

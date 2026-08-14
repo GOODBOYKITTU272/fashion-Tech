@@ -5,6 +5,7 @@ import { getLinkedInIntegrationState } from '@/lib/linkedin-control'
 import { getNextScheduledPost } from '@/lib/next-post-control'
 import { canPublishScheduledPost } from '@/lib/publishing-gate'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { importKnownLinkedInNativePosts } from '@/lib/linkedin-native-sync'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +19,9 @@ export async function GET(req: Request) {
     const userId = auth.userId
     const admin = getSupabaseAdmin()
 
-    // Execute server-side operational state queries strictly for authenticated userId
+    // Ensure known native posts exist in calendar (idempotent deduplicated merge)
+    await importKnownLinkedInNativePosts(userId)
+
     const [
       automationState,
       linkedinState,
@@ -31,11 +34,10 @@ export async function GET(req: Request) {
       getLinkedInIntegrationState(userId),
       getNextScheduledPost(userId),
       admin.from('pipeline_runs').select('*').eq('user_id', userId).order('started_at', { ascending: false }).limit(5),
-      admin.from('content_calendar').select('id, draft_id, planned_date, planned_time, pillar, format, status, quality_gate_status, created_at').eq('user_id', userId).order('planned_date', { ascending: true }).limit(10),
-      admin.from('research_signals').select('id, source_name, url, title, category, relevance_status, relevance_score, topic_family, relevance_reason, captured_at, processed').order('captured_at', { ascending: false }).limit(10)
+      admin.from('content_calendar').select('id, draft_id, planned_date, planned_time, pillar, format, status, quality_gate_status, source, external_platform, external_status, created_at').eq('user_id', userId).order('planned_date', { ascending: true }).limit(10),
+      admin.from('research_signals').select('id, source_name, url, title, category, platform, query_used, relevance_status, relevance_score, topic_family, relevance_reason, captured_at, processed').order('captured_at', { ascending: false }).limit(10)
     ])
 
-    // Query draft metadata for upcoming calendar items
     const draftIds = (upcomingPosts || []).map(p => p.draft_id).filter(Boolean)
     let draftMap: Record<string, any> = {}
     if (draftIds.length > 0) {
@@ -52,14 +54,17 @@ export async function GET(req: Request) {
         draft_id: p.draft_id,
         title: draft?.title || `${p.pillar} Post`,
         planned_date: p.planned_date,
-        planned_time: p.planned_time,
+        planned_time: p.planned_time || '20:30:00',
         pillar: p.pillar,
         format: p.format,
         quality_gate_status: p.quality_gate_status || 'passed',
         image_status: draft?.image_generation_status || 'none',
         image_url: draft?.image_url || null,
         publishing_status: p.status,
-        provenance: 'REAL'
+        source: p.source || 'internal',
+        external_platform: p.external_platform || null,
+        external_status: p.external_status || null,
+        provenance: p.source === 'linkedin_native' ? 'LINKEDIN_NATIVE' : 'INTERNAL'
       }
     })
 
@@ -82,6 +87,7 @@ export async function GET(req: Request) {
       publishing_gate: gateResult,
       upcoming_posts: formattedUpcomingPosts,
       recent_signals: recentSignals || [],
+      sync_mode: 'MANUAL_IMPORT',
       production_engine: {
         vercel_cron: 'ACTIVE (0 2 * * *)',
         last_pipeline_run: lastRun ? {
@@ -141,6 +147,7 @@ export async function GET(req: Request) {
       next_post: null,
       upcoming_posts: [],
       recent_signals: [],
+      sync_mode: 'MANUAL_IMPORT',
       publishing_gate: {
         allowed: false,
         reason_code: 'AUTOMATION_STATE_UNAVAILABLE',
