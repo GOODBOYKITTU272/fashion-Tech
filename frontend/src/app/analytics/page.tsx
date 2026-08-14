@@ -16,6 +16,7 @@ type MetricSummary = {
 
 export default function AnalyticsPage() {
   const [loading, setLoading] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [stats, setStats] = useState<MetricSummary>({
     total_followers: 0,
     usa_followers: 0,
@@ -73,6 +74,24 @@ export default function AnalyticsPage() {
     loadMetrics()
   }, [])
 
+  const handleSyncMetrics = async () => {
+    setSyncing(true)
+    try {
+      const res = await fetch('/api/analytics/sync', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        alert(`Successfully synchronized ${data.sync_count} post metrics from Zernio!`)
+        window.location.reload()
+      } else {
+        alert(`Sync failed: ${data.error || 'Unknown error'}`)
+      }
+    } catch (err: any) {
+      alert(`Sync failed: ${err.message || err}`)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   // Simple client-side CSV parser
   const handleCSVUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -123,8 +142,8 @@ export default function AnalyticsPage() {
               .insert({
                 published_post_id: postId,
                 followers_total: totalFollowers,
-                usa_followers: Number(row['USA Followers'] || row['usa_followers'] || Math.round(totalFollowers * 0.4)),
-                uk_followers: Number(row['UK Followers'] || row['uk_followers'] || Math.round(totalFollowers * 0.2)),
+                usa_followers: Number(row['USA Followers'] || row['usa_followers'] || 0),
+                uk_followers: Number(row['UK Followers'] || row['uk_followers'] || 0),
                 impressions,
                 reactions,
                 comments,
@@ -174,12 +193,19 @@ export default function AnalyticsPage() {
   return (
     <div className="page fade-up">
       {/* Page Header */}
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <p className="section-label">CODE × CRAFT METRICS</p>
           <h1 className="page-title">Performance Analytics</h1>
           <p className="page-subtitle">Qualified USA + UK audience expansion metrics</p>
         </div>
+        <button 
+          onClick={handleSyncMetrics} 
+          disabled={syncing}
+          className="btn btn-primary btn-sm"
+        >
+          {syncing ? 'Syncing...' : '🔄 Sync Real-Time Metrics'}
+        </button>
       </div>
 
       {/* KPI North-Star Board */}

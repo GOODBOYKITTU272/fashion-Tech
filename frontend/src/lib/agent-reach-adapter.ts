@@ -550,11 +550,124 @@ export async function runAgentReachW1Ingestion(userId: string): Promise<Ingestio
   }
 
   // ==================================================
-  // 4. TWITTER / X (Check Authentication Credentials)
+  // 4. TWITTER / X (Check Authentication Credentials & Run Search)
   // ==================================================
   const xApiKey = process.env.X_API_KEY || process.env.TWITTER_BEARER_TOKEN
   if (xApiKey && !xApiKey.startsWith('your-')) {
-    sourceStatuses.twitter_x = { status: 'active', transport: 'TWITTER_API' }
+    try {
+      const twitterRes = await fetch('https://api.twitter.com/2/tweets/search/recent?query=%23fashiontech%20OR%20%23CLO3D&max_results=10', {
+        headers: {
+          'Authorization': `Bearer ${xApiKey}`
+        }
+      })
+      
+      if (twitterRes.status === 200) {
+        const data = await twitterRes.json()
+        const tweets = data.data || []
+        let xCount = 0
+
+        for (const tweet of tweets) {
+          if (xCount >= 3) break
+          const tweetText = tweet.text || ''
+          const tweetUrl = `https://twitter.com/i/web/status/${tweet.id}`
+          const tweetTitle = tweetText.substring(0, 60) + (tweetText.length > 60 ? '...' : '')
+
+          discoveredCount++
+          xCount++
+
+          const fingerprint = generateFingerprint(tweetUrl, tweetTitle)
+          
+          // Dedupe
+          const { data: existing } = await admin
+            .from('research_signals')
+            .select('id')
+            .or(`url.eq.${tweetUrl},fingerprint.eq.${fingerprint}`)
+            .limit(1)
+
+          if (existing && existing.length > 0) {
+            deduplicatedCount++
+            continue
+          }
+
+          const relevanceResult = await evaluateResearchRelevance(tweetTitle, tweetText)
+
+          if (relevanceResult.eligible) {
+            acceptedCount++
+          } else {
+            rejectedCount++
+          }
+
+          const signal: CanonicalResearchSignal = {
+            source_name: 'Twitter/X Search',
+            source_url: tweetUrl,
+            title: tweetTitle,
+            summary: tweetText,
+            published_at: new Date().toISOString(),
+            discovered_at: new Date().toISOString(),
+            category: 'X/Twitter Discovery',
+            raw_text: tweetText,
+            source_type: 'web_search',
+            platform: 'Twitter/X',
+            query_used: '#fashiontech OR #CLO3D',
+            runtime: 'cloud',
+            agent_reach_used: false,
+            trust_score: 65, // Trust Level C
+            relevance_status: relevanceResult.relevance_status,
+            relevance_score: relevanceResult.relevance_score,
+            positioning_fit_score: relevanceResult.positioning_fit_score,
+            why_it_matters_to_pranavi: relevanceResult.why_it_matters_to_pranavi,
+            topic_family: relevanceResult.topic_family,
+            relevance_reason: relevanceResult.relevance_reason,
+            research_run_id: researchRunId
+          }
+
+          const { error: insertErr } = await admin.from('research_signals').insert({
+            source_name: signal.source_name,
+            source_type: signal.source_type,
+            platform: signal.platform,
+            query_used: signal.query_used,
+            runtime: signal.runtime,
+            agent_reach_used: signal.agent_reach_used,
+            trust_score: signal.trust_score,
+            url: signal.source_url,
+            title: signal.title,
+            summary: signal.summary,
+            raw_content: signal.raw_text,
+            category: signal.category,
+            published_at: signal.published_at,
+            captured_at: signal.discovered_at,
+            fingerprint,
+            relevance_status: relevanceResult.relevance_status,
+            relevance_score: relevanceResult.relevance_score,
+            positioning_fit_score: relevanceResult.positioning_fit_score,
+            why_it_matters_to_pranavi: relevanceResult.why_it_matters_to_pranavi,
+            topic_family: relevanceResult.topic_family,
+            relevance_reason: relevanceResult.relevance_reason,
+            relevance_checked_at: new Date().toISOString(),
+            processed: !relevanceResult.eligible,
+            research_run_id: researchRunId,
+            provenance: 'TWITTER_X',
+            transport_used: 'TWITTER_API',
+            fallback_used: false
+          })
+
+          if (!insertErr) {
+            insertedCount++
+            resultSignals.push(signal)
+          } else if (insertErr.code === '23505') {
+            deduplicatedCount++
+          }
+        }
+        sourceStatuses.twitter_x = { status: 'active', transport: 'TWITTER_API' }
+      } else if (twitterRes.status === 401 || twitterRes.status === 403) {
+        sourceStatuses.twitter_x = { status: 'auth_required', transport: 'TWITTER_API' }
+      } else {
+        sourceStatuses.twitter_x = { status: 'failed', transport: 'TWITTER_API' }
+      }
+    } catch (err: any) {
+      errors.push(`Twitter/X search failed: ${err.message}`)
+      sourceStatuses.twitter_x = { status: 'failed', transport: 'TWITTER_API' }
+    }
   } else {
     sourceStatuses.twitter_x = { status: 'auth_required', transport: 'TWITTER_API' }
   }

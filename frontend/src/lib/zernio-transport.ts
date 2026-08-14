@@ -51,16 +51,36 @@ export class ZernioLinkedInTransport implements LinkedInTransport {
 
     const pdfUrl = payload.document_metadata?.storage_url
     const mediaUrl = payload.media_metadata?.media_url
+    const multiMedia = payload.multi_media_metadata
 
     if (pdfUrl) {
       mediaItems.push({
         type: 'document',
         url: pdfUrl
       })
+    } else if (multiMedia && multiMedia.length > 0) {
+      multiMedia.forEach(m => {
+        mediaItems.push({
+          type: 'image',
+          url: m.media_url
+        })
+      })
     } else if (mediaUrl) {
-      mediaItems.push({
-        type: 'image',
-        url: mediaUrl
+      let urls: string[] = []
+      try {
+        if (mediaUrl.trim().startsWith('[')) {
+          urls = JSON.parse(mediaUrl)
+        } else {
+          urls = mediaUrl.split(',').map(u => u.trim()).filter(Boolean)
+        }
+      } catch (e) {
+        urls = mediaUrl.split(',').map(u => u.trim()).filter(Boolean)
+      }
+      urls.forEach(url => {
+        mediaItems.push({
+          type: 'image',
+          url
+        })
       })
     }
 

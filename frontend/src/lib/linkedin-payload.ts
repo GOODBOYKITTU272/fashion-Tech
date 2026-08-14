@@ -20,6 +20,10 @@ export interface LinkedInNormalizedPayload {
     title?: string
     asset_id?: string
   }
+  multi_media_metadata?: Array<{
+    media_url: string
+    title?: string
+  }>
   document_metadata?: {
     file_name?: string
     mime_type: 'application/pdf'
@@ -76,9 +80,11 @@ export function buildLinkedInPostPayload(input: RawPostContentInput): PayloadBui
     }
   }
 
-  // 4. Image / Video Media Validation
+  // 4. Image / Video / Multi-Image Media Validation
   let mediaMetadata = undefined
-  if (requestType === 'image' || requestType === 'video') {
+  let multiMediaMetadata = undefined
+
+  if (requestType === 'image' || requestType === 'video' || requestType === 'multi_image') {
     if (!mediaUrl) {
       return {
         valid: false,
@@ -86,9 +92,36 @@ export function buildLinkedInPostPayload(input: RawPostContentInput): PayloadBui
         error_message: `Required media asset URL for request_type ${requestType} is missing.`
       }
     }
-    mediaMetadata = {
-      media_url: mediaUrl,
-      title: title
+    
+    if (requestType === 'multi_image') {
+      let urls: string[] = []
+      try {
+        if (mediaUrl.trim().startsWith('[')) {
+          urls = JSON.parse(mediaUrl)
+        } else {
+          urls = mediaUrl.split(',').map(u => u.trim()).filter(Boolean)
+        }
+      } catch (e) {
+        urls = mediaUrl.split(',').map(u => u.trim()).filter(Boolean)
+      }
+
+      if (urls.length === 0) {
+        return {
+          valid: false,
+          error_code: 'MEDIA_NOT_READY',
+          error_message: 'No valid image URLs found for multi_image post format.'
+        }
+      }
+
+      multiMediaMetadata = urls.map(url => ({
+        media_url: url,
+        title: title
+      }))
+    } else {
+      mediaMetadata = {
+        media_url: mediaUrl,
+        title: title
+      }
     }
   }
 
@@ -104,6 +137,7 @@ export function buildLinkedInPostPayload(input: RawPostContentInput): PayloadBui
     commentary: commentaryText,
     visibility: 'PUBLIC',
     media_metadata: mediaMetadata,
+    multi_media_metadata: multiMediaMetadata,
     document_metadata: documentMetadata,
     live_requirements_status: missingReqs.length === 0 ? 'COMPLETE' : 'LIVE_REQUIREMENT_MISSING',
     missing_requirements: missingReqs
