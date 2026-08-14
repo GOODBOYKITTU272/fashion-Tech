@@ -33,6 +33,17 @@ interface ControlRoomStatusData {
     reason_code: string
     reasons: string[]
   }
+  health?: {
+    last_pipeline_run?: {
+      run_id: string
+      started_at: string
+      completed_at: string | null
+      current_stage: string
+      status: string
+      error_code: string | null
+      failure_reason: string | null
+    }
+  }
 }
 
 export default function TodayPage() {
@@ -40,23 +51,26 @@ export default function TodayPage() {
   const [loading, setLoading] = useState(true)
   const [dryRunLoading, setDryRunLoading] = useState(false)
   const [dryRunResult, setDryRunResult] = useState<any>(null)
+  const [pipelineLoading, setPipelineLoading] = useState(false)
+  const [pipelineResult, setPipelineResult] = useState<any>(null)
   const [ingestLoading, setIngestLoading] = useState(false)
   const [ingestResult, setIngestResult] = useState<any>(null)
 
-  useEffect(() => {
-    async function loadStatus() {
-      try {
-        const res = await authenticatedFetch('/api/control-room/status')
-        if (res.ok) {
-          const json = await res.json()
-          setData(json)
-        }
-      } catch (err) {
-        console.error('Failed to load control room status API:', err)
-      } finally {
-        setLoading(false)
+  const loadStatus = async () => {
+    try {
+      const res = await authenticatedFetch('/api/control-room/status')
+      if (res.ok) {
+        const json = await res.json()
+        setData(json)
       }
+    } catch (err) {
+      console.error('Failed to load control room status API:', err)
+    } finally {
+      setLoading(false)
     }
+  }
+
+  useEffect(() => {
     loadStatus()
   }, [])
 
@@ -95,6 +109,7 @@ export default function TodayPage() {
       })
       const json = await res.json()
       setIngestResult(json)
+      await loadStatus()
     } catch (err: any) {
       setIngestResult({
         success: false,
@@ -105,10 +120,34 @@ export default function TodayPage() {
     }
   }
 
+  const handleRunFullPipeline = async () => {
+    setPipelineLoading(true)
+    setPipelineResult(null)
+    try {
+      const res = await authenticatedFetch('/api/signals/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      const json = await res.json()
+      setPipelineResult(json)
+      await loadStatus()
+    } catch (err: any) {
+      setPipelineResult({
+        success: false,
+        error: err.message || 'Pipeline execution failed'
+      })
+    } finally {
+      setPipelineLoading(false)
+    }
+  }
+
   const autoState = data?.automation
   const linkedinState = data?.linkedin
   const nextPost = data?.next_post
   const gateResult = data?.publishing_gate
+  const lastRun = data?.health?.last_pipeline_run
+
+  const isZernioConnected = linkedinState?.integration_status === 'ZERNIO_CONNECTED' || linkedinState?.can_publish
 
   return (
     <div className="page">
@@ -120,13 +159,19 @@ export default function TodayPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <Link href="/settings" className="btn btn-ghost btn-sm">
-            ⚙️ Manage OAuth
-          </Link>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button 
+            disabled={pipelineLoading}
+            className="btn btn-primary btn-sm"
+            style={{ background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)' }}
+            onClick={handleRunFullPipeline}
+          >
+            {pipelineLoading ? 'Running Pipeline...' : '⚡ Run W1→W6 Pipeline'}
+          </button>
+
           <button 
             disabled={ingestLoading}
-            className="btn btn-primary btn-sm"
+            className="btn btn-secondary btn-sm"
             onClick={handleTriggerIngestion}
           >
             {ingestLoading ? 'Syncing...' : '🔄 Sync Research Sources'}
@@ -144,11 +189,8 @@ export default function TodayPage() {
             {autoState?.pause_all_publishing && (
               <span className="badge badge-red">⛔ PAUSE ALL PUBLISHING ACTIVE</span>
             )}
-            <span className={`badge ${
-              linkedinState?.integration_status === 'CONNECTED' ? 'badge-green' :
-              linkedinState?.integration_status === 'REAUTH_REQUIRED' ? 'badge-yellow' : 'badge-gray'
-            }`}>
-              LIVE TRANSPORT: NOT SELECTED
+            <span className={`badge ${isZernioConnected ? 'badge-green' : 'badge-gray'}`}>
+              LIVE TRANSPORT: {isZernioConnected ? 'ZERNIO (ACTIVE)' : 'NOT SELECTED'}
             </span>
             <span className="badge badge-blue">
               RESEARCH INGESTION: SAFE HTTP READY
@@ -173,6 +215,28 @@ export default function TodayPage() {
           <p style={{ fontSize: '0.8rem', color: 'var(--text-2)', marginTop: '0.25rem' }}>
             Discovered: <strong>{ingestResult.signals_discovered ?? 0}</strong> | Inserted: <strong>{ingestResult.signals_inserted ?? 0}</strong> | Deduplicated: <strong>{ingestResult.signals_deduplicated ?? 0}</strong>
           </p>
+        </div>
+      )}
+
+      {/* PIPELINE RESULT BANNER */}
+      {pipelineResult && (
+        <div className="card card-pad-sm" style={{ marginBottom: '1.5rem', background: pipelineResult.status === 'COMPLETED' ? 'var(--green-dim)' : 'var(--accent-dim)', borderColor: 'var(--border)' }}>
+          <p style={{ fontWeight: 600, fontSize: '0.85rem', color: pipelineResult.status === 'COMPLETED' ? 'var(--green)' : 'var(--accent)' }}>
+            ⚡ Pipeline Execution Trace ({pipelineResult.run_id}): {pipelineResult.status}
+          </p>
+          {pipelineResult.failure_reason && (
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-2)', marginTop: '0.25rem' }}>
+              Reason: {pipelineResult.failure_reason}
+            </p>
+          )}
+          {pipelineResult.stage_results && (
+            <details style={{ marginTop: '0.5rem' }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--primary)', fontSize: '0.8rem' }}>View Stage Execution Trace</summary>
+              <pre style={{ background: '#111', padding: '0.5rem', borderRadius: '4px', fontSize: '0.725rem', overflowX: 'auto', marginTop: '0.4rem', color: '#e0e0e0' }}>
+                {JSON.stringify(pipelineResult.stage_results, null, 2)}
+              </pre>
+            </details>
+          )}
         </div>
       )}
 
@@ -207,10 +271,10 @@ export default function TodayPage() {
               NEXT SCHEDULED POST
             </span>
             <p style={{ fontSize: '1rem', color: 'var(--text-2)', fontWeight: 500, margin: '0.25rem 0' }}>
-              No scheduled post yet
+              No scheduled post queued for today
             </p>
             <p style={{ fontSize: '0.775rem', color: 'var(--text-3)', margin: 0 }}>
-              Use the Post Editor or Weekly Scheduler to queue future content.
+              Click <strong>⚡ Run W1→W6 Pipeline</strong> above or use Post Editor to generate new content.
             </p>
           </div>
         )}
@@ -222,7 +286,7 @@ export default function TodayPage() {
             </p>
             <p style={{ fontSize: '0.8rem', color: gateResult?.allowed ? 'var(--green)' : 'var(--accent)', marginTop: '0.2rem' }}>
               {gateResult?.allowed
-                ? '✅ ELIGIBLE — Ready for dry-run simulation'
+                ? '✅ ELIGIBLE — Ready for Zernio live / dry-run simulation'
                 : `BLOCKED — Reason Code: ${gateResult?.reason_code || 'LINKEDIN_NOT_CONNECTED'}`
               }
             </p>
@@ -273,15 +337,36 @@ export default function TodayPage() {
         )}
       </div>
 
+      {/* RECENT PIPELINE EXECUTION HISTORY */}
+      {lastRun && (
+        <div className="card card-pad-sm" style={{ marginBottom: '1.5rem' }}>
+          <h3 style={{ fontSize: '0.9rem', fontWeight: 600, margin: '0 0 0.5rem 0' }}>
+            📊 Last Automated Cloud Run Status
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', fontSize: '0.8rem' }}>
+            <div>Stage: <strong>{lastRun.current_stage}</strong></div>
+            <div>Status: <strong style={{ color: lastRun.status === 'COMPLETED' ? 'var(--green)' : 'var(--accent)' }}>{lastRun.status}</strong></div>
+            <div>Completed: <strong>{lastRun.completed_at ? new Date(lastRun.completed_at).toLocaleTimeString() : 'In Progress'}</strong></div>
+          </div>
+        </div>
+      )}
+
       {/* TODAY'S INBOX OPPORTUNITIES LIST */}
-      <div className="card card-pad" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+      <div className="card card-pad" style={{ textAlign: 'center', padding: '2.5rem 1.5rem' }}>
         <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📫</div>
         <h3 style={{ fontSize: '1.1rem', fontWeight: 600, margin: '0 0 0.5rem 0' }}>
-          No new unprocessed research signals
+          Real Research Pipeline Ready
         </h3>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-2)', maxWidth: '420px', margin: '0 auto' }}>
-          Research signal ingestion acquires safe fashion technology, Indian craftsmanship, and textile signals into Supabase. Click <strong>Sync Research Sources</strong> to trigger acquisition.
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-2)', maxWidth: '460px', margin: '0 auto 1.25rem auto' }}>
+          Research signal ingestion acquires safe fashion technology, Indian craftsmanship, and textile signals into Supabase. Click <strong>⚡ Run W1→W6 Pipeline</strong> to evaluate and generate new content.
         </p>
+        <button 
+          disabled={pipelineLoading}
+          className="btn btn-primary"
+          onClick={handleRunFullPipeline}
+        >
+          {pipelineLoading ? 'Processing Pipeline...' : '⚡ Trigger W1→W6 Pipeline Run'}
+        </button>
       </div>
     </div>
   )
