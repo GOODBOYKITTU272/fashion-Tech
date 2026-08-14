@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import {
   handleTelegramWebhookCallback,
   handleTelegramMessageText,
-  answerTelegramCallbackQuery
+  answerTelegramCallbackQuery,
+  sendTelegramTextMessage
 } from '@/lib/telegram-bot'
 
 export const dynamic = 'force-dynamic'
@@ -21,6 +22,10 @@ export async function POST(req: Request) {
 
       if (callbackQueryId) {
         await answerTelegramCallbackQuery(callbackQueryId, result.message)
+      }
+
+      if (chatId) {
+        await sendTelegramTextMessage(String(chatId), `<b>Notification:</b> ${result.message}`)
       }
 
       return NextResponse.json({ ok: true, source: 'callback_query', result })
