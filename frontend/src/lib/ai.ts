@@ -31,6 +31,14 @@ async function readPromptFile(filename: string): Promise<string> {
   }
 }
 
+function validateScoreField(fieldValue: any, fieldName: string): number {
+  const num = Number(fieldValue)
+  if (isNaN(num) || num < 0 || num > 100) {
+    throw new Error(`SCORING_UNAVAILABLE: Field '${fieldName}' must be a valid number between 0 and 100. Received: ${fieldValue}`)
+  }
+  return num
+}
+
 // Call configured AI provider
 async function callModel(systemPrompt: string, userPrompt: string, jsonMode = false): Promise<string> {
   const provider = process.env.AI_PROVIDER || 'openai'
@@ -38,7 +46,7 @@ async function callModel(systemPrompt: string, userPrompt: string, jsonMode = fa
   if (provider === 'openai') {
     const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey || apiKey.startsWith('your-')) {
-      throw new Error('OpenAI API key not configured')
+      throw new Error('OPENAI_UNAVAILABLE: OpenAI API key is not configured in environment')
     }
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -58,16 +66,20 @@ async function callModel(systemPrompt: string, userPrompt: string, jsonMode = fa
     })
     if (!res.ok) {
       const err = await res.text()
-      throw new Error(`OpenAI API error: ${err}`)
+      throw new Error(`OPENAI_UNAVAILABLE: OpenAI API error (HTTP ${res.status}): ${err}`)
     }
     const data = await res.json()
-    return data.choices[0].message.content || ''
+    const content = data.choices?.[0]?.message?.content
+    if (!content) {
+      throw new Error('OPENAI_UNAVAILABLE: OpenAI returned empty completion content')
+    }
+    return content
   }
 
   if (provider === 'gemini') {
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
-      throw new Error('Gemini API key not configured')
+      throw new Error('GEMINI_UNAVAILABLE: Gemini API key is not configured')
     }
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
@@ -81,122 +93,139 @@ async function callModel(systemPrompt: string, userPrompt: string, jsonMode = fa
     })
     if (!res.ok) {
       const err = await res.text()
-      throw new Error(`Gemini API error: ${err}`)
+      throw new Error(`GEMINI_UNAVAILABLE: Gemini API error: ${err}`)
     }
     const data = await res.json()
-    return data.candidates[0].content.parts[0].text || ''
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!content) {
+      throw new Error('GEMINI_UNAVAILABLE: Gemini returned empty completion content')
+    }
+    return content
   }
 
-  throw new Error(`Unknown AI provider: ${provider}`)
+  throw new Error(`AI_PROVIDER_UNAVAILABLE: Unknown AI provider '${provider}'`)
 }
 
+/**
+ * scoreTopic
+ * Evaluates topic relevance using LLM.
+ * Strictly validates all score fields (0-100).
+ * Fails closed on any API error or missing/malformed score. ZERO synthetic fallbacks.
+ */
 export async function scoreTopic(title: string, summary: string): Promise<ScoringResult> {
   const promptTemplate = await readPromptFile('topic-scoring.md')
-  const systemPrompt = promptTemplate || 'Score this topic for relevance.'
+  const systemPrompt = promptTemplate || 'Score this topic for relevance. Return JSON object with numeric scores between 0 and 100 for freshness_score, source_trust_score, us_relevance_score, uk_relevance_score, pranavi_alignment_score, total_opportunity_score, and string fields reasoning, recommended_pillar, recommended_format.'
   const userPrompt = JSON.stringify({ title, summary })
 
+  const rawResponse = await callModel(systemPrompt, userPrompt, true)
+  let parsed: any
   try {
-    const rawResponse = await callModel(systemPrompt, userPrompt, true)
-    const parsed = JSON.parse(rawResponse)
-    const data = Array.isArray(parsed) ? parsed[0] : parsed
-    return {
-      freshness_score: Number(data.freshness_score ?? 85),
-      source_trust_score: Number(data.source_trust_score ?? 85),
-      us_relevance_score: Number(data.us_relevance_score ?? 80),
-      uk_relevance_score: Number(data.uk_relevance_score ?? 80),
-      pranavi_alignment_score: Number(data.pranavi_alignment_score ?? 90),
-      total_opportunity_score: Number(data.total_opportunity_score ?? 87),
-      reasoning: data.reasoning ?? 'Scored by AI abstraction layer.',
-      recommended_pillar: data.recommended_pillar ?? 'Educational',
-      recommended_format: data.recommended_format ?? 'carousel'
-    }
-  } catch (error: any) {
-    const textLower = (title + ' ' + summary).toLowerCase()
-    const isFashionTech = textLower.includes('mit') || textLower.includes('recyclable') || textLower.includes('yarn') || textLower.includes('textile') || textLower.includes('ai') || textLower.includes('craft') || textLower.includes('sustainable')
-    
-    const pranaviScore = isFashionTech ? 92 : 70
-    const trustScore = isFashionTech ? 90 : 65
-    const usScore = isFashionTech ? 85 : 60
-    const ukScore = isFashionTech ? 80 : 60
-    const freshnessScore = 88
-    const totalScore = isFashionTech ? 87 : 65
+    parsed = JSON.parse(rawResponse)
+  } catch (err: any) {
+    throw new Error(`SCORING_UNAVAILABLE: Failed to parse AI JSON response: ${err.message}`)
+  }
 
-    return {
-      freshness_score: freshnessScore,
-      source_trust_score: trustScore,
-      us_relevance_score: usScore,
-      uk_relevance_score: ukScore,
-      pranavi_alignment_score: pranaviScore,
-      total_opportunity_score: totalScore,
-      reasoning: `Domain keyword relevance scoring activated (${isFashionTech ? 'High Domain Alignment' : 'Standard Alignment'}). Reason: ${error.message}`,
-      recommended_pillar: 'Educational',
-      recommended_format: 'carousel'
-    }
+  const data = Array.isArray(parsed) ? parsed[0] : parsed
+  if (!data || typeof data !== 'object') {
+    throw new Error('SCORING_UNAVAILABLE: AI response did not contain a valid JSON object')
+  }
+
+  const freshness_score = validateScoreField(data.freshness_score, 'freshness_score')
+  const source_trust_score = validateScoreField(data.source_trust_score, 'source_trust_score')
+  const us_relevance_score = validateScoreField(data.us_relevance_score, 'us_relevance_score')
+  const uk_relevance_score = validateScoreField(data.uk_relevance_score, 'uk_relevance_score')
+  const pranavi_alignment_score = validateScoreField(data.pranavi_alignment_score, 'pranavi_alignment_score')
+  const total_opportunity_score = validateScoreField(data.total_opportunity_score, 'total_opportunity_score')
+
+  if (!data.reasoning || typeof data.reasoning !== 'string') {
+    throw new Error('SCORING_UNAVAILABLE: Missing or invalid reasoning string in AI response')
+  }
+
+  return {
+    freshness_score,
+    source_trust_score,
+    us_relevance_score,
+    uk_relevance_score,
+    pranavi_alignment_score,
+    total_opportunity_score,
+    reasoning: data.reasoning,
+    recommended_pillar: String(data.recommended_pillar || 'Educational'),
+    recommended_format: String(data.recommended_format || 'carousel')
   }
 }
 
+/**
+ * generateDraft
+ * Generates post draft using LLM.
+ * Fails closed on any API error or missing content. ZERO synthetic copy fabrication.
+ */
 export async function generateDraft(title: string, summary: string, pillar = 'Educational', format = 'carousel', personalInput = ''): Promise<DraftResult> {
   const systemPrompt = `You are an expert fashion-tech content creator for Pranavi (Positioning: Code × Craft × Contemporary Design). Generate a high-quality ${format} draft on pillar '${pillar}'. Return JSON with keys: title, hook, full_content, pillar, format.`
   const userPrompt = JSON.stringify({ title, summary, pillar, format, personalInput })
 
+  const rawResponse = await callModel(systemPrompt, userPrompt, true)
+  let data: any
   try {
-    const rawResponse = await callModel(systemPrompt, userPrompt, true)
-    const data = JSON.parse(rawResponse)
-    return {
-      title: data.title || title,
-      hook: data.hook || `Discover how ${title} is redefining modern textile innovation.`,
-      full_content: data.full_content || `${title}\n\n${summary}\n\nKey Takeaways:\n1. Sustainability in modern textiles.\n2. Intersection of engineering & craftsmanship.`,
-      pillar: data.pillar || pillar,
-      format: data.format || format
-    }
-  } catch (error: any) {
-    return {
-      title: title,
-      hook: `Discover how ${title} is redefining modern textile innovation.`,
-      full_content: `# ${title}\n\n${summary}\n\n## Key Takeaways\n1. Engineering breakdown of recyclable yarn technology.\n2. Circular fashion design principles.\n3. Scalability in contemporary textile manufacturing.`,
-      pillar: pillar,
-      format: format
-    }
+    data = JSON.parse(rawResponse)
+  } catch (err: any) {
+    throw new Error(`DRAFT_GENERATION_UNAVAILABLE: Failed to parse AI draft JSON response: ${err.message}`)
+  }
+
+  if (!data || typeof data !== 'object' || !data.title || !data.hook || !data.full_content) {
+    throw new Error('DRAFT_GENERATION_UNAVAILABLE: AI draft output incomplete or missing required title/hook/full_content fields')
+  }
+
+  return {
+    title: String(data.title).trim(),
+    hook: String(data.hook).trim(),
+    full_content: String(data.full_content).trim(),
+    pillar: String(data.pillar || pillar).trim(),
+    format: String(data.format || format).trim()
   }
 }
 
+/**
+ * generateCarouselOutline
+ * Fails closed on any API error or invalid response.
+ */
 export async function generateCarouselOutline(postBody: string, pillar = 'Educational', topicSummary = '', hookSelected = ''): Promise<any> {
-  const systemPrompt = 'Generate a 5-slide carousel outline for LinkedIn. Return JSON object with title, slides array, cta.'
+  const systemPrompt = 'Generate a 5-slide carousel outline for LinkedIn. Return JSON object with title, slides array (with slide_no, headline, text), cta.'
   const userPrompt = JSON.stringify({ postBody, pillar, topicSummary, hookSelected })
 
+  const rawResponse = await callModel(systemPrompt, userPrompt, true)
+  let data: any
   try {
-    const rawResponse = await callModel(systemPrompt, userPrompt, true)
-    return JSON.parse(rawResponse)
-  } catch {
-    return {
-      title: postBody.substring(0, 50),
-      slides: [
-        { slide_no: 1, headline: postBody.substring(0, 50), text: 'Hook slide introducing the core breakthrough.' },
-        { slide_no: 2, headline: 'The Technical Breakdown', text: 'Engineering details behind modern yarn innovation.' },
-        { slide_no: 3, headline: 'Craftsmanship Meets Code', text: 'How contemporary fashion incorporates circular textiles.' },
-        { slide_no: 4, headline: 'Industry Impact', text: 'Reducing waste in global manufacturing.' },
-        { slide_no: 5, headline: 'What This Means For Designers', text: 'Actionable summary and future implications.' }
-      ],
-      cta: 'Follow Pranavi for deep dives on Code × Craft.'
-    }
+    data = JSON.parse(rawResponse)
+  } catch (err: any) {
+    throw new Error(`CAROUSEL_GENERATION_UNAVAILABLE: Failed to parse AI carousel JSON response: ${err.message}`)
   }
+
+  if (!data || !Array.isArray(data.slides) || data.slides.length === 0) {
+    throw new Error('CAROUSEL_GENERATION_UNAVAILABLE: AI carousel response missing required slides array')
+  }
+
+  return data
 }
 
+/**
+ * generateWeeklyReview
+ * Fails closed on any API error or invalid response.
+ */
 export async function generateWeeklyReview(metricsData: any, brandProfile = {}): Promise<any> {
   const systemPrompt = 'Analyze weekly publishing metrics and generate insights. Return JSON object with summary, top_performing_pillar, recommendations array.'
   const userPrompt = JSON.stringify({ metricsData, brandProfile })
 
+  const rawResponse = await callModel(systemPrompt, userPrompt, true)
+  let data: any
   try {
-    const rawResponse = await callModel(systemPrompt, userPrompt, true)
-    return JSON.parse(rawResponse)
-  } catch {
-    return {
-      summary: 'Weekly performance review generated via analytics abstraction.',
-      top_performing_pillar: 'Educational',
-      recommendations: [
-        'Maintain high visual quality on Educational carousels.',
-        'Include personal context on Storytelling posts before scheduling.'
-      ]
-    }
+    data = JSON.parse(rawResponse)
+  } catch (err: any) {
+    throw new Error(`REVIEW_GENERATION_UNAVAILABLE: Failed to parse AI review JSON response: ${err.message}`)
   }
+
+  if (!data || !data.summary) {
+    throw new Error('REVIEW_GENERATION_UNAVAILABLE: AI review response incomplete')
+  }
+
+  return data
 }

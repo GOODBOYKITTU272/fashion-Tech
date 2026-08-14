@@ -123,13 +123,14 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
       }
     }
 
-    // 4. Run Real 9-Point Publishing Eligibility Gate
+    // 4. Run Real Publishing Eligibility Gate (Passing dryRun flag)
     const gateResult = await canPublishScheduledPost({
       userId,
       contentStatus: calItem.status,
       qualityGateStatus: qualityStatus,
       confidenceScore: confidenceScore,
-      personalContextStatus: 'passed'
+      personalContextStatus: 'passed',
+      dryRun
     })
 
     // 5. Build LinkedIn Post Payload
@@ -238,7 +239,7 @@ export async function publishScheduledPost(params: PublishScheduledPostParams): 
 
 /**
  * validatePublisherPayload
- * Independent payload validation helper. Allows testing payload formatting and document_pdf mapping even when live OAuth gate reports LINKEDIN_NOT_CONNECTED.
+ * Independent payload validation helper.
  */
 export async function validatePublisherPayload(userId: string, calendarId: string): Promise<PublishResult> {
   const admin = getSupabaseAdmin()

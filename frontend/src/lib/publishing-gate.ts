@@ -8,6 +8,7 @@ export interface PublishingEligibilityParams {
   qualityGateStatus?: string
   confidenceScore?: number
   personalContextStatus?: string
+  dryRun?: boolean
 }
 
 export interface PublishingEligibilityResult {
@@ -22,7 +23,8 @@ export async function canPublishScheduledPost(params: PublishingEligibilityParam
     contentStatus = 'scheduled',
     qualityGateStatus = 'passed',
     confidenceScore = 75,
-    personalContextStatus = 'passed'
+    personalContextStatus = 'passed',
+    dryRun = false
   } = params
 
   const reasons: string[] = []
@@ -77,49 +79,51 @@ export async function canPublishScheduledPost(params: PublishingEligibilityParam
     }
   }
 
-  // 2. Fetch Official LinkedIn Integration Readiness State
-  const linkedinState = await getLinkedInIntegrationState(userId)
+  // 2. Fetch Official LinkedIn Integration Readiness State (ENFORCED FOR LIVE MODE ONLY)
+  if (!dryRun) {
+    const linkedinState = await getLinkedInIntegrationState(userId)
 
-  if (linkedinState.integration_status !== 'CONNECTED') {
-    reasons.push(`LinkedIn integration is not connected (Current state: ${linkedinState.integration_status}).`)
-    return {
-      allowed: false,
-      reason_code: 'LINKEDIN_NOT_CONNECTED',
-      reasons
+    if (linkedinState.integration_status !== 'CONNECTED') {
+      reasons.push(`LinkedIn integration is not connected (Current state: ${linkedinState.integration_status}).`)
+      return {
+        allowed: false,
+        reason_code: 'LINKEDIN_NOT_CONNECTED',
+        reasons
+      }
+    }
+
+    if (linkedinState.reauthorization_required || linkedinState.auth_status === 'expired' || linkedinState.auth_status === 'revoked') {
+      reasons.push('LinkedIn authorization token has expired or requires reauthorization.')
+      await logAutomationEvent({
+        userId,
+        eventType: 'REAUTH_REQUIRED',
+        severity: 'warning',
+        message: 'Publishing eligibility evaluation blocked by expired LinkedIn token.'
+      })
+      return {
+        allowed: false,
+        reason_code: 'REAUTH_REQUIRED',
+        reasons
+      }
+    }
+
+    if (!linkedinState.granted_scopes.includes('w_member_social')) {
+      reasons.push('LinkedIn connection is missing required posting permission scope (w_member_social).')
+      await logAutomationEvent({
+        userId,
+        eventType: 'PERMISSION_MISSING',
+        severity: 'warning',
+        message: 'Publishing eligibility evaluation blocked by missing w_member_social scope.'
+      })
+      return {
+        allowed: false,
+        reason_code: 'PERMISSION_MISSING',
+        reasons
+      }
     }
   }
 
-  if (linkedinState.reauthorization_required || linkedinState.auth_status === 'expired' || linkedinState.auth_status === 'revoked') {
-    reasons.push('LinkedIn authorization token has expired or requires reauthorization.')
-    await logAutomationEvent({
-      userId,
-      eventType: 'REAUTH_REQUIRED',
-      severity: 'warning',
-      message: 'Publishing eligibility evaluation blocked by expired LinkedIn token.'
-    })
-    return {
-      allowed: false,
-      reason_code: 'REAUTH_REQUIRED',
-      reasons
-    }
-  }
-
-  if (!linkedinState.granted_scopes.includes('w_member_social')) {
-    reasons.push('LinkedIn connection is missing required posting permission scope (w_member_social).')
-    await logAutomationEvent({
-      userId,
-      eventType: 'PERMISSION_MISSING',
-      severity: 'warning',
-      message: 'Publishing eligibility evaluation blocked by missing w_member_social scope.'
-    })
-    return {
-      allowed: false,
-      reason_code: 'PERMISSION_MISSING',
-      reasons
-    }
-  }
-
-  // 3. Quality Gate & Content Verification Rules
+  // 3. Quality Gate & Content Verification Rules (STRICTLY ENFORCED FOR BOTH LIVE & DRY-RUN)
   if (qualityGateStatus !== 'passed') {
     if (qualityGateStatus === 'needs_input' || personalContextStatus === 'needs_input') {
       reasons.push('Post requires personal story/experience input from Pranavi before publishing.')

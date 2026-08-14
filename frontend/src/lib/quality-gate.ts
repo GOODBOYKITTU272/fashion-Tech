@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { getSupabaseAdmin } from './supabase-admin'
 
 export interface QualityGateCheckInput {
   draftId: string
@@ -26,6 +26,7 @@ export interface QualityGateResult {
 export async function runQualityGate(input: QualityGateCheckInput): Promise<QualityGateResult> {
   const { draftId, title, body, pillar, hasPersonalInput = false } = input
   const now = new Date().toISOString()
+  const admin = getSupabaseAdmin()
 
   let factCheckStatus = 'passed' as GateCheckStatus
   let voiceCheckStatus = 'passed' as GateCheckStatus
@@ -46,7 +47,7 @@ export async function runQualityGate(input: QualityGateCheckInput): Promise<Qual
 
   // 2. Duplicate Check — Check recent drafts in database for title similarity
   try {
-    const { data: existingDrafts } = await supabase
+    const { data: existingDrafts } = await admin
       .from('drafts')
       .select('id, created_at')
       .neq('id', draftId)
@@ -91,7 +92,7 @@ export async function runQualityGate(input: QualityGateCheckInput): Promise<Qual
 
   // 5. Persist quality gate result to database
   try {
-    await supabase
+    await admin
       .from('drafts')
       .update({
         quality_gate_status: overallStatus,
