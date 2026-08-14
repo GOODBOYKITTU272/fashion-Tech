@@ -439,3 +439,19 @@ export async function generateWeeklyReview(metricsData: any, brandProfile = {}):
 
   return data
 }
+
+/**
+ * reviseDraftContent
+ * Revises a draft based on natural-language feedback, keeping modifications minimal and focused.
+ */
+export async function reviseDraftContent(title: string, fullContent: string, instructions: string, format = 'carousel'): Promise<{ title: string; hook: string; full_content: string; image_prompt?: string }> {
+  const systemPrompt = `You are an expert fashion-tech content creator for Pranavi (Positioning: Code × Craft × Contemporary Design). The user wants to revise a draft based on the instructions. Keep the changes minimal and targeted only to what was requested. Return JSON with keys: title, hook, full_content, image_prompt.`
+  const userPrompt = JSON.stringify({ title, fullContent, instructions, format })
+  const aiRes = await callTextModel(systemPrompt, userPrompt, true)
+  try {
+    return JSON.parse(aiRes.content)
+  } catch (err: any) {
+    throw new Error(`REVISION_FAILED: Failed to parse AI response: ${err.message}`)
+  }
+}
+

@@ -1,4 +1,6 @@
 import { getSupabaseAdmin } from './supabase-admin'
+import { reviseDraftContent } from './ai'
+import { generateLinkedInPdfCarousel } from './carousel-engine'
 
 export interface TelegramApprovalRequestInput {
   calendar_id: string
@@ -24,7 +26,6 @@ export interface TelegramApprovalResult {
 /**
  * sendTelegramApprovalRequest
  * Sends human approval notification to Telegram with inline buttons: APPROVE, REJECT, EDIT.
- * Rejects unauthorized accounts and returns TELEGRAM_NOT_CONFIGURED if token is unconfigured.
  */
 export async function sendTelegramApprovalRequest(input: TelegramApprovalRequestInput): Promise<TelegramApprovalResult> {
   const botToken = process.env.TELEGRAM_BOT_TOKEN
@@ -110,11 +111,36 @@ ${input.carousel_pdf_url ? `\n<b>PDF Carousel:</b> <a href="${input.carousel_pdf
 }
 
 /**
+ * answerTelegramCallbackQuery
+ */
+export async function answerTelegramCallbackQuery(callbackQueryId: string, text: string): Promise<void> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN
+  if (!botToken) return
+  await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: callbackQueryId, text })
+  })
+}
+
+/**
+ * sendTelegramTextMessage
+ */
+export async function sendTelegramTextMessage(chatId: string, text: string): Promise<void> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN
+  if (!botToken) return
+  await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
+  })
+}
+
+/**
  * handleTelegramWebhookCallback
  * Authenticates callback from Telegram bot, updates content_calendar and drafts approval status cleanly.
  */
 export async function handleTelegramWebhookCallback(callbackQuery: any): Promise<{ success: boolean; action: string; message: string }> {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN
   const allowedChatId = process.env.TELEGRAM_ALLOWED_CHAT_ID || process.env.TELEGRAM_CHAT_ID
 
   const fromId = String(callbackQuery?.from?.id || callbackQuery?.message?.chat?.id || '')
@@ -159,6 +185,117 @@ export async function handleTelegramWebhookCallback(callbackQuery: any): Promise
   }
 
   return { success: false, action: 'UNKNOWN', message: 'Unknown action' }
+}
+
+/**
+ * handleTelegramMessageText
+ * Processes user text reply to EDIT changes. Revises draft, increments version, and resends for approval.
+ */
+export async function handleTelegramMessageText(chatId: string, text: string): Promise<void> {
+  const allowedChatId = process.env.TELEGRAM_ALLOWED_CHAT_ID || process.env.TELEGRAM_CHAT_ID
+  if (!allowedChatId || String(chatId) !== allowedChatId) {
+    console.error('Unauthorized Telegram text message received from:', chatId)
+    return
+  }
+
+  const admin = getSupabaseAdmin()
+
+  // Find latest content_calendar row in 'changes_requested' status
+  const { data: posts } = await admin
+    .from('content_calendar')
+    .select('id, draft_id, pillar, format, planned_date, planned_time, approved_version, carousel_pdf_url, carousel_cover_url')
+    .eq('approval_status', 'changes_requested')
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  const post = posts?.[0]
+  if (!post) {
+    await sendTelegramTextMessage(chatId, 'Hi Pranavi! No posts are currently awaiting edits. Tap "✏️ EDIT" on any post in Today\'s Inbox to request revisions.')
+    return
+  }
+
+  await sendTelegramTextMessage(chatId, `Got it! Revising the draft with: "${text}". Please wait while I regenerate the assets...`)
+
+  try {
+    // Get draft content
+    const { data: drafts } = await admin
+      .from('drafts')
+      .select('id, title, full_content')
+      .eq('id', post.draft_id)
+      .limit(1)
+
+    const draft = drafts?.[0]
+    if (!draft) {
+      throw new Error('Draft row missing for the selected calendar post.')
+    }
+
+    // Call AI to revise draft content
+    const revised = await reviseDraftContent(draft.title, draft.full_content, text, post.format)
+
+    const nextVersion = (post.approved_version || 1) + 1
+
+    // Update draft in database
+    await admin
+      .from('drafts')
+      .update({
+        title: revised.title,
+        hook: revised.hook,
+        full_content: revised.full_content,
+        edit_instructions: text,
+        approved_version: nextVersion
+      })
+      .eq('id', draft.id)
+
+    // Re-render PDF Carousel if format is carousel
+    let pdfUrl = post.carousel_pdf_url
+    let coverUrl = post.carousel_cover_url
+
+    if (post.format === 'pdf_carousel' || post.format === 'carousel') {
+      const carouselRes = await generateLinkedInPdfCarousel({
+        title: revised.title,
+        hook: revised.hook,
+        sections: [
+          { heading: 'Key Concept', body: revised.hook },
+          { heading: 'Educational Deep Dive', body: revised.full_content }
+        ],
+        sources: [{ name: 'Vogue Business' }]
+      })
+      if (carouselRes.success) {
+        pdfUrl = carouselRes.carousel_pdf_url
+        coverUrl = carouselRes.carousel_cover_url
+      }
+    }
+
+    // Update calendar post
+    await admin
+      .from('content_calendar')
+      .update({
+        approval_status: 'pending_approval',
+        approved_version: nextVersion,
+        edit_instructions: text,
+        carousel_pdf_url: pdfUrl,
+        carousel_cover_url: coverUrl
+      })
+      .eq('id', post.id)
+
+    // Resend fresh preview for approval
+    await sendTelegramApprovalRequest({
+      calendar_id: post.id,
+      title: revised.title,
+      pillar: post.pillar,
+      format: post.format,
+      planned_date: post.planned_date,
+      planned_time: post.planned_time || '20:30:00',
+      caption: revised.full_content,
+      sources: ['Vogue Business'],
+      carousel_pdf_url: pdfUrl,
+      carousel_cover_url: coverUrl
+    })
+
+  } catch (err: any) {
+    console.error('Failed to process draft revision:', err)
+    await sendTelegramTextMessage(chatId, `⚠️ Revision failed: ${err.message}`)
+  }
 }
 
 function escapeHtml(str: string): string {
