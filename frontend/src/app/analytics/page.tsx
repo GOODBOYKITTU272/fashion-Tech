@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import ZernioAnalytics from './ZernioAnalytics'
 import { supabase } from '@/lib/supabase'
 
 type MetricSummary = {
@@ -291,6 +292,9 @@ export default function AnalyticsPage() {
           )}
         </div>
       </div>
+
+      {/* Embedded Native Zernio Analytics View */}
+      <ZernioAnalytics />
     </div>
   )
 }

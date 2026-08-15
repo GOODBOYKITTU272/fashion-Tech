@@ -154,6 +154,11 @@ export async function POST(req: Request) {
         const reposts = metrics.reposts !== undefined || metrics.shares !== undefined
           ? Number(metrics.reposts !== undefined ? metrics.reposts : metrics.shares)
           : null
+        const saves = metrics.saves !== undefined ? Number(metrics.saves) : 0
+        const clicks = metrics.clicks !== undefined ? Number(metrics.clicks) : 0
+        const views = metrics.views !== undefined ? Number(metrics.views) : 0
+        const reach = metrics.reach !== undefined ? Number(metrics.reach) : 0
+        const engagement_rate = metrics.engagement_rate !== undefined ? Number(metrics.engagement_rate) : null
 
         await admin
           .from('post_metrics')
@@ -163,6 +168,11 @@ export async function POST(req: Request) {
             reactions,
             comments,
             reposts,
+            saves,
+            clicks,
+            views,
+            reach,
+            engagement_rate,
             snapshot_at: new Date().toISOString()
           })
 
